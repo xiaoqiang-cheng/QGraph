@@ -139,6 +139,29 @@ def ps(show_all: bool):
         with urllib.request.urlopen(req, timeout=3) as resp:
             runs = json.loads(resp.read().decode())
     except Exception:
+        if show_all:
+            from qgraph.engine.run_manager import RunManager
+            saved = RunManager.list_saved_logs()
+            if not saved:
+                click.echo("No executions found.")
+                return
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+            table = Table(title="Saved Executions (server not running)")
+            table.add_column("Run ID", style="cyan")
+            table.add_column("Graph", style="green")
+            table.add_column("Status", style="yellow")
+            table.add_column("Logs", justify="right")
+            for e in saved[:20]:
+                sc = "green" if e["status"] == "completed" else "red"
+                st = f"[{sc}]{e['status']}[/{sc}]"
+                table.add_row(
+                    e["run_id"], e["graph_name"], st, str(e["log_count"])
+                )
+            console.print(table)
+            return
         click.echo("Could not connect to QGraph server. Is it running? (qgraph serve)")
         return
 
@@ -221,15 +244,21 @@ def logs(run_id: str):
     console.print()
 
     for entry in log_data.get("logs", []):
-        msg = entry.get("message", "")
+        if isinstance(entry, dict):
+            msg = entry.get("message", "")
+            node_id = entry.get("node_id", "")[:12]
+            line = f"  [dim][{node_id}][/dim] {msg}"
+        else:
+            msg = str(entry)
+            line = f"  {msg}"
         is_err = "Failed" in msg or "ERROR" in msg or "[stderr]" in msg
         is_ok = "Completed" in msg or "successfully" in msg
-        style = "red" if is_err else "green" if is_ok else ""
-        node_id = entry.get("node_id", "")[:12]
-        if style:
-            console.print(f"  [dim][{node_id}][/dim] [{style}]{msg}[/{style}]")
+        if is_err:
+            console.print(f"[red]{line}[/red]")
+        elif is_ok:
+            console.print(f"[green]{line}[/green]")
         else:
-            console.print(f"  [dim][{node_id}][/dim] {msg}")
+            console.print(line)
 
 
 @main.command()

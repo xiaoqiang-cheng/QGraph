@@ -21,7 +21,13 @@ frontend = subprocess.Popen(
 try:
     backend.wait()
 except KeyboardInterrupt:
-    backend.terminate()
-    frontend.terminate()
-    backend.wait()
-    frontend.wait()
+    pass
+finally:
+    for p in (backend, frontend):
+        if p.poll() is None:
+            p.terminate()
+    for p in (backend, frontend):
+        try:
+            p.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            p.kill()

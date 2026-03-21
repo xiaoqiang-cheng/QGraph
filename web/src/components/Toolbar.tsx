@@ -6,9 +6,14 @@ interface ToolbarProps {
   isRunning: boolean
   isSaving: boolean
   onBack?: () => void
+  layoutDirection: 'LR' | 'TB'
+  onToggleLayout: () => void
 }
 
-export default function Toolbar({ graphName, onSave, onRun, onStop, isRunning, isSaving, onBack }: ToolbarProps) {
+export default function Toolbar({
+  graphName, onSave, onRun, onStop, isRunning, isSaving, onBack,
+  layoutDirection, onToggleLayout,
+}: ToolbarProps) {
   const btnBase: React.CSSProperties = {
     padding: '6px 14px',
     borderRadius: 6,
@@ -57,6 +62,20 @@ export default function Toolbar({ graphName, onSave, onRun, onStop, isRunning, i
       }}>
         {graphName || 'Untitled'}
       </span>
+
+      <button
+        onClick={onToggleLayout}
+        style={{
+          ...btnBase,
+          background: 'var(--bg-surface)',
+          color: 'var(--text-secondary)',
+          fontSize: 12,
+          padding: '5px 10px',
+        }}
+        title={layoutDirection === 'LR' ? 'Switch to vertical layout' : 'Switch to horizontal layout'}
+      >
+        {layoutDirection === 'LR' ? '↕ Vertical' : '↔ Horizontal'}
+      </button>
 
       <button
         onClick={onSave}

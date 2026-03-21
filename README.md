@@ -1,366 +1,463 @@
-# QGraph - 可视化 Pipeline 编辑器
+# QGraph
 
-> **版本**：v0.1.0 (MVP)
-> **日期**：2026-03-21
-> **作者**：晓强
+**轻量级可视化 Pipeline 编排工具**
+
+> 版本：v0.1.0 · 作者：晓强 · License: MIT
+
+将散乱的脚本组织为可视化 DAG 工作流。通过 Web UI 拖拽编排，CLI 一键运行。`pip install` 即开箱即用。
+
+```
+[数据准备] → [模型训练] → [评估] → [导出 ONNX] → [完成]
+                       → [量化] ↗
+```
 
 ---
 
-## 1. 产品概述
+## 目录
 
-### 1.1 产品定位
-
-一个**轻量级可视化工作流编排工具**，以 Python 包形式分发（`pip install qgraph`），提供 Web UI 编辑 + CLI 管理双模式。
-
-通过节点式 UI 让用户以"接线"的方式定义节点任务的执行流程、数据流向和上下文传递。专注于本地任务流编排，尤其适合 AI/ML 工程师的日常工作流。
-
-主要目的是快速构建任务流，例如在深度学习训练任务中的训练、量化、评估、测试等，经常需要来回切换脚本修改配置，工作复杂，容易出错。
-
-本质上是一个可视化的任务调度器。
-
-### 1.2 核心价值
-
-- **可视化编排**：将散乱的脚本调用组织为可视化 DAG，直观且易维护
-- **配置集中管理**：避免在多个脚本中来回修改参数
-- **支持复杂工作流**：串行、并行（MVP），条件分支、循环（后续迭代）
-- **Web UI 创建任务节点**：编辑节点参数和可执行脚本/binary 等内容
-- **实时日志推送**：UI 运行并实时打印 log
-- **一键复现**：保存 graph 后 CLI 一键运行，方便实验管理
-- **pip 包分发**：`pip install qgraph` 即可使用，无需联网依赖
-
-### 1.3 差异化优势
-
-| 对比维度 | QGraph | Airflow/Prefect | n8n/Node-RED | ComfyUI |
-|---------|--------|----------------|--------------|---------|
-| 安装方式 | pip install | 复杂部署 | Docker/npm | 独立安装 |
-| 定义方式 | 可视化拖拽 | 代码定义 | 可视化 | 可视化 |
-| 专注场景 | 任务调度/ML流水线 | 数据工程 | 集成/自动化 | 图像生成 |
-| CLI 支持 | 原生双模式 | 有 | 弱 | 弱 |
-| 轻量级 | 单机开箱即用 | 需要数据库/调度器 | 相对轻量 | 中等 |
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [Web UI 使用指南](#web-ui-使用指南)
+  - [Dashboard](#dashboard)
+  - [编辑器](#编辑器)
+  - [节点类型](#节点类型)
+  - [节点配置](#节点配置)
+  - [运行 Pipeline](#运行-pipeline)
+- [CLI 命令参考](#cli-命令参考)
+- [示例：ML 训练流水线](#示例ml-训练流水线)
+- [数据存储](#数据存储)
+- [技术架构](#技术架构)
+- [开发指南](#开发指南)
 
 ---
 
-## 2. 技术架构
+## 安装
 
-### 2.1 技术栈
+**系统要求**：Python ≥ 3.10
 
-| 层 | 技术选型 | 说明 |
-|-----|----------|------|
-| 前端 | React + TypeScript + React Flow + Vite | 打包为静态资源嵌入 Python 包 |
-| 后端 | Python + FastAPI + asyncio | WebSocket 日志推送 + REST API |
-| 存储 | SQLite + JSON | SQLite 管理元数据，JSON 存储 graph 定义 |
-| 进程管理 | asyncio.subprocess | 异步子进程管理 |
-| 打包 | pyproject.toml + hatchling | pip 包分发 |
-| UI 主题 | 明暗双主题 | 支持切换 |
-
-### 2.2 系统架构总览
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                         pip install qgraph                          │
-│                                                                      │
-│  ┌──────────────────────┐          ┌───────────────────────────┐     │
-│  │       CLI 入口        │          │     Web UI (React)        │     │
-│  │                      │          │                           │     │
-│  │  qgraph serve ──────────────────── 启动 FastAPI + 静态文件   │     │
-│  │  qgraph run   ─────┐ │          │  Dashboard (图管理面板)    │     │
-│  │  qgraph list  ──┐  │ │          │  EditorView (画布编辑器)   │     │
-│  │  qgraph ps    ──┤  │ │          │    ├─ React Flow 画布     │     │
-│  │  qgraph logs  ──┤  │ │          │    ├─ Sidebar (节点面板)   │     │
-│  │  qgraph stop  ──┤  │ │          │    ├─ ConfigPanel (配置)   │     │
-│  │  ...            │  │ │          │    └─ LogPanel (日志)      │     │
-│  └─────────────────┤──┤─┘          └────────────┬──────────────┘     │
-│                    │  │                          │                    │
-│                    │  │         HTTP REST         │  WebSocket        │
-│                    │  │        ┌──────────────────┘  (日志+状态)      │
-│                    │  │        │                                      │
-│                    ▼  ▼        ▼                                      │
-│  ┌──────────────────────────────────────────────────────────────┐     │
-│  │                    FastAPI 服务层 (:9800)                     │     │
-│  │                                                              │     │
-│  │  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │     │
-│  │  │   REST API       │  │   WebSocket     │  │  Static      │ │     │
-│  │  │   /api/graphs/*  │  │   /ws/graph/*   │  │  Files       │ │     │
-│  │  │   /api/runs/*    │  │   /ws/dashboard │  │  (build产物) │ │     │
-│  │  └────────┬─────────┘  └───────┬─────────┘  └──────────────┘ │     │
-│  │           │                    │                              │     │
-│  └───────────┤────────────────────┤──────────────────────────────┘     │
-│              │                    │                                    │
-│              ▼                    │                                    │
-│  ┌──────────────────────────────────────────────────────────────┐     │
-│  │                       调度引擎层                              │     │
-│  │                                                              │     │
-│  │  ┌──────────────────────┐    ┌───────────────────────────┐   │     │
-│  │  │   RunManager         │    │   PipelineExecutor        │   │     │
-│  │  │   (运行状态追踪)      │───▶│   (DAG 拓扑排序调度)       │   │     │
-│  │  │   - start/stop run   │    │   - Kahn 算法             │   │     │
-│  │  │   - 日志持久化        │    │   - 并行 asyncio.gather   │   │     │
-│  │  │   - 状态查询          │    │   - on_log 回调           │   │     │
-│  │  └──────────────────────┘    │   - on_status 回调        │   │     │
-│  │                              └──────────┬────────────────┘   │     │
-│  └─────────────────────────────────────────┤────────────────────┘     │
-│                                            │                          │
-│                                            ▼                          │
-│  ┌──────────────────────────────────────────────────────────────┐     │
-│  │                       执行层                                  │     │
-│  │                                                              │     │
-│  │  ┌─────────────┐ ┌─────────────┐ ┌──────────────────────┐   │     │
-│  │  │ Shell 节点   │ │ Script 节点  │ │ Function 节点        │   │     │
-│  │  │             │ │             │ │                      │   │     │
-│  │  │ subprocess  │ │ subprocess  │ │ importlib.import     │   │     │
-│  │  │ shell=True  │ │ python xx   │ │ func(**kwargs)       │   │     │
-│  │  └──────┬──────┘ └──────┬──────┘ └──────────┬───────────┘   │     │
-│  │         │               │                    │               │     │
-│  │         └───────────────┴────────────────────┘               │     │
-│  │                         │                                    │     │
-│  │                  stdout/stderr                               │     │
-│  │                  逐行实时读取                                  │     │
-│  │                         │                                    │     │
-│  └─────────────────────────┤────────────────────────────────────┘     │
-│                            │                                          │
-└────────────────────────────┤──────────────────────────────────────────┘
-                             │
-                             ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                        存储层                                    │
-│                                                                  │
-│  ~/.qgraph/                                                      │
-│  ├── graphs/                    # Graph 定义（JSON 文件）         │
-│  │   ├── ml-training-pipeline.json                               │
-│  │   └── ...                                                     │
-│  └── logs/                      # 运行日志（JSON 文件）           │
-│      └── run_xxx.json                                            │
-└──────────────────────────────────────────────────────────────────┘
+```bash
+pip install qgraph
 ```
 
-### 2.3 运行时数据流
+验证安装：
 
-```
-用户点击 Run
-      │
-      ▼
-┌─────────────┐     POST /api/graphs/{name}/run
-│  Web UI     │ ──────────────────────────────────▶ ┌──────────┐
-│  (浏览器)    │                                     │  FastAPI  │
-│             │ ◀── WebSocket ── 日志+状态推送 ───── │          │
-└─────────────┘                                     └─────┬────┘
-                                                          │
-                                                          ▼
-                                                    ┌───────────┐
-                                                    │RunManager  │
-                                                    │            │
-                                                    │ asyncio    │
-                                                    │ .create_   │
-                                                    │  task()    │
-                                                    └─────┬─────┘
-                                                          │
-                                                          ▼
-                                                   ┌────────────┐
-                                                   │ Executor   │
-                                                   │            │
-                                                   │ 拓扑排序    │
-                                                   │ 取入度=0   │
-                                                   └─────┬──────┘
-                                                         │
-                                          ┌──────────────┼──────────────┐
-                                          ▼              ▼              ▼
-                                     ┌─────────┐   ┌─────────┐   ┌─────────┐
-                                     │ Node A  │   │ Node B  │   │ Node C  │
-                                     │(并行执行)│   │(并行执行)│   │(等待AB) │
-                                     └────┬────┘   └────┬────┘   └────┬────┘
-                                          │             │              │
-                                          ▼             ▼              │
-                                     on_log(行)    on_log(行)          │
-                                          │             │              │
-                                          ▼             ▼              │
-                                     ┌──────────────────┐             │
-                                     │  WebSocket 推送   │             │
-                                     │  → 浏览器日志面板  │             │
-                                     │  → 节点状态高亮    │             │
-                                     └──────────────────┘             │
-                                                                      │
-                                          AB 都完成，C 入度→0          │
-                                          ◀────────────────────────────┘
-                                          │
-                                          ▼
-                                     ┌─────────┐
-                                     │ Node C  │
-                                     │ 开始执行 │
-                                     └─────────┘
+```bash
+qgraph --version
 ```
 
-### 2.4 存储设计
+---
+
+## 快速开始
+
+### 方式一：Web UI（推荐）
+
+```bash
+# 启动服务
+qgraph serve
+
+# 浏览器访问 http://localhost:9800
+```
+
+在 Dashboard 中创建一个新 Pipeline，进入编辑器，拖拽节点到画布，连线，配置，点击 Run。
+
+### 方式二：CLI
+
+```bash
+# 列出所有 Pipeline
+qgraph list
+
+# 创建一个新的 Pipeline
+qgraph create my-pipeline
+
+# 启动 Web UI 编辑它
+qgraph serve
+# 浏览器打开 http://localhost:9800/?graph=my-pipeline
+
+# 编辑完成后，CLI 直接运行（不需要启动 Web 服务）
+qgraph run my-pipeline
+```
+
+---
+
+## Web UI 使用指南
+
+### Dashboard
+
+访问 `http://localhost:9800`，Dashboard 是主控面板：
+
+- **Pipeline 列表**：查看所有已保存的 Pipeline，显示节点数量和更新时间
+- **创建 Pipeline**：输入名称，点击 `+ Create` 或按 Enter
+- **运行 Pipeline**：点击 `▶ Run` 按钮直接运行
+- **删除 Pipeline**：点击 `Delete` 按钮（会弹出确认框）
+- **实时运行状态**：正在运行的 Pipeline 会实时显示当前节点和进度
+- **运行历史**：最近的运行记录及其状态（completed / error / stopped）
+- **主题切换**：右上角 ☀️/🌙 按钮切换明暗主题
+
+点击 Pipeline 名称或 `View` 按钮进入编辑器。
+
+### 编辑器
+
+编辑器由四个区域组成：
+
+```
+┌──────────┬──────────────────────────────┬──────────┐
+│          │                              │          │
+│  Sidebar │        画布 (Canvas)          │  Config  │
+│  (节点)   │                              │  Panel   │
+│          │   拖拽节点，连线编排           │  (配置)   │
+│          │                              │          │
+│          ├──────────────────────────────┤          │
+│          │      Log Panel (日志)         │          │
+└──────────┴──────────────────────────────┴──────────┘
+```
+
+**画布操作**：
+
+| 操作 | 方式 |
+|------|------|
+| 添加节点 | 从左侧 Sidebar 拖拽节点到画布 |
+| 移动节点 | 直接拖拽画布上的节点 |
+| 连线 | 从节点底部的输出端口拖线到另一个节点顶部的输入端口 |
+| 删除节点/连线 | 选中后按 `Delete` 或 `Backspace` |
+| 缩放 | 鼠标滚轮 |
+| 平移 | 按住鼠标右键拖动，或使用触控板 |
+
+**工具栏按钮**：
+
+| 按钮 | 功能 |
+|------|------|
+| ← Back | 返回 Dashboard |
+| 💾 Save | 保存 Pipeline 到文件 |
+| ▶ Run | 运行当前 Pipeline |
+| ⏹ Stop | 停止正在运行的 Pipeline（运行中才显示） |
+
+### 节点类型
+
+QGraph 提供 5 种节点类型：
+
+#### Shell Command（橙色 🟠）
+
+执行任意 Shell 命令。
+
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| Command | Shell 命令 | `bash ./scripts/quantize.sh` |
+| Working Dir | 工作目录（可选） | `./project` |
+| Env Vars | 环境变量（可选） | `MODEL_PATH=./model.pt` |
+
+#### Python Script（蓝色 🔵）
+
+执行 Python 脚本文件。
+
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| Script Path | 脚本路径 | `./scripts/train.py` |
+| Args | 命令行参数（可选） | `--epochs 10 --lr 0.001` |
+| Python Path | Python 解释器（可选，默认 `python`） | `python3.12` |
+| Working Dir | 工作目录（可选） | `./project` |
+| Env Vars | 环境变量（可选） | `CUDA_VISIBLE_DEVICES=0` |
+
+#### Python Function（紫色 🟣）
+
+直接调用 Python 模块中的函数。
+
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| Module Path | Python 模块路径 | `my_package.utils` |
+| Function Name | 函数名 | `process_data` |
+| Kwargs | 关键字参数（可选） | JSON 格式 |
+
+函数支持同步和异步（`async def`）。
+
+#### Input（绿色 🟢）
+
+Pipeline 的入口节点。定义初始参数，后续可注入到下游节点。
+
+#### Output（红色 🔴）
+
+Pipeline 的出口节点。标记 Pipeline 的结束点。
+
+### 节点配置
+
+点击画布上的节点，右侧会打开配置面板：
+
+1. **名称**：修改节点显示名称
+2. **类型相关配置**：根据节点类型显示不同的配置表单
+3. **环境变量**：为节点执行设置环境变量键值对
+
+编辑完配置后会自动保存到节点，但需要点击工具栏的 `Save` 按钮才会持久化到文件。
+
+### 运行 Pipeline
+
+**通过 Web UI 运行**：
+
+1. 点击工具栏 `▶ Run` 按钮
+2. 节点状态实时更新：
+   - ⚪ 灰色：等待中（idle）
+   - 🟡 黄色脉冲：排队中（queued）
+   - 🟡 旋转图标：执行中（running）
+   - 🟢 绿色：成功（success）
+   - 🔴 红色：失败（failed）
+3. 底部 Log Panel 实时显示每个节点的标准输出和错误输出
+4. 如果需要停止，点击 `⏹ Stop` 按钮
+
+**执行逻辑**：
+
+- 使用 DAG 拓扑排序（Kahn 算法）确定执行顺序
+- 没有依赖关系的节点自动并行执行
+- 汇合节点会等待所有上游节点完成后才开始
+- 如果任意节点失败，其下游节点仍会按正常流程调度（不会级联取消）
+
+---
+
+## CLI 命令参考
+
+### 服务管理
+
+```bash
+qgraph serve                     # 启动 Web UI 服务（默认 http://localhost:9800）
+qgraph serve --port 9801         # 指定端口
+qgraph serve --host 0.0.0.0     # 允许外部访问
+```
+
+### Pipeline 管理
+
+```bash
+qgraph list                      # 列出所有 Pipeline
+qgraph create <name>             # 创建新 Pipeline
+qgraph edit <name>               # 打印编辑器 URL
+qgraph delete <name>             # 删除 Pipeline
+```
+
+### 运行管理
+
+```bash
+qgraph run <name>                # 运行 Pipeline（前台，实时输出日志）
+qgraph ps                        # 列出运行中的任务（需要服务器运行）
+qgraph ps -a                     # 列出所有任务（含历史，支持离线查看）
+qgraph logs <run_id>             # 查看某次运行的详细日志
+qgraph stop <run_id>             # 停止运行中的任务
+```
+
+### 导入/导出
+
+```bash
+qgraph export <name>             # 导出为 JSON（默认 <name>.json）
+qgraph export <name> -o out.json # 指定导出路径
+qgraph import pipeline.json      # 从 JSON 导入 Pipeline
+```
+
+### 注意事项
+
+- `qgraph run` 不需要启动 Web 服务，直接读取本地 JSON 文件执行
+- `qgraph ps` 查看运行中任务需要 Web 服务运行；`qgraph ps -a` 可以离线查看历史
+- `qgraph logs` 优先从服务器获取，服务器未运行时自动读取本地日志文件
+
+---
+
+## 示例：ML 训练流水线
+
+QGraph 自带一个完整的 ML 训练流水线示例：`ml-training-pipeline`。
+
+### 流水线结构
+
+```
+[Input] → [Prepare Data] → [Train Model] → [Evaluate]    → [Export ONNX] → [Output]
+                                          → [Quantize]  ↗
+```
+
+- **Input**：定义初始参数（epochs、学习率、输出目录等）
+- **Prepare Data**：生成训练数据（`demo/02_prepare_data.py`）
+- **Train Model**：模拟模型训练（`demo/03_train.py`）
+- **Evaluate** + **Quantize**：训练完成后并行执行评估和量化
+- **Export ONNX**：等待评估和量化都完成后，导出模型
+- **Output**：收集最终结果
+
+### 运行示例
+
+```bash
+# CLI 运行
+qgraph run ml-training-pipeline
+
+# 查看运行日志
+qgraph logs <run_id>
+```
+
+输出示例：
+
+```
+Running graph: ml-training-pipeline
+
+  ✓ [node_input] → success
+  ✓ [node_prepare] → success
+    [stdout] === Step 2: Preparing Data ===
+    [stdout] Generating 200 samples...
+    [stdout] Done!
+  ✓ [node_train] → success
+    [stdout] === Step 3: Training Model ===
+    [stdout]   Epoch 1/5 - loss: 0.5043 - acc: 0.5905
+    [stdout]   Epoch 5/5 - loss: 0.1219 - acc: 0.9842
+  ⟳ [node_evaluate] → running     # 并行执行
+  ⟳ [node_quantize] → running     # 并行执行
+  ✓ [node_evaluate] → success
+  ✓ [node_quantize] → success
+  ✓ [node_export] → success
+  ✓ [node_output] → success
+
+Pipeline completed successfully: 7 nodes
+```
+
+---
+
+## 数据存储
+
+QGraph 的数据存储在用户主目录下：
 
 ```
 ~/.qgraph/
-├── graphs/                         # Graph 定义文件（JSON）
-│   ├── ml-training-pipeline.json   # 每个图一个文件
+├── graphs/                          # Pipeline 定义文件
+│   ├── default.json
+│   ├── ml-training-pipeline.json
 │   └── ...
-└── logs/                           # 运行日志（JSON）
-    └── run_{name}_{id}_{ts}.json   # 每次运行一个文件
+└── logs/                            # 运行日志
+    ├── run_ml-training-pipeline_1_1774090129.json
+    └── ...
 ```
+
+- **graphs/**：每个 Pipeline 一个 JSON 文件，包含节点、连线、位置信息和配置
+- **logs/**：每次运行一个 JSON 文件，包含运行 ID、状态、节点状态和完整日志
+
+Pipeline JSON 文件可以直接用 `qgraph export` / `qgraph import` 进行备份和共享。
 
 ---
 
-## 3. 功能需求
-
-### 3.1 节点类型（MVP）
-
-| 节点类型 | 说明 | 配置项 |
-|---------|------|--------|
-| Shell Command | 执行 shell 命令 | command, working_dir, env_vars |
-| Python Script | 执行 Python 脚本 | script_path, args, python_path |
-| Python Function | 调用 Python 函数 | module_path, function_name, kwargs |
-| Input | 工作流入口，定义初始参数 | 参数键值对 |
-| Output | 工作流出口，收集结果 | 输出格式 |
-
-### 3.2 节点属性
-
-每个节点包含：
-
-- **唯一标识**：节点 ID
-- **显示名称**：用户可见名称
-- **节点类型**：上述类型之一
-- **输入定义**：输入端口和预期格式
-- **输出定义**：输出端口和格式
-- **配置参数**：节点-specific 配置
-- **位置信息**：画布上的坐标
-
-### 3.3 连线/数据流
-
-- **连接**：从输出端口拖拽到输入端口
-- **数据传递（MVP）**：文件路径 + 环境变量 + 模板替换（`{{node_a.output.model_path}}`）
-- **数据流向**：支持串行、并行、汇聚
-- **后续扩展**：结构化 JSON 数据流
-
-### 3.4 工作流模式
-
-#### 3.4.1 串行执行（MVP）
+## 技术架构
 
 ```
-[A] → [B] → [C]
+┌─────────────────────────────────────────────────────────────┐
+│                      pip install qgraph                      │
+│                                                              │
+│  ┌──────────────┐          ┌──────────────────────────┐      │
+│  │   CLI (click) │          │   Web UI (React + Vite)  │      │
+│  │              │          │                          │      │
+│  │  serve       │          │  Dashboard               │      │
+│  │  run         │          │  Editor (React Flow)     │      │
+│  │  list/ps/... │          │  Config / Log Panel      │      │
+│  └──────┬───────┘          └────────────┬─────────────┘      │
+│         │                               │                    │
+│         ▼                               ▼                    │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │              FastAPI 服务层 (:9800)                    │    │
+│  │  REST API (/api/graphs/*, /api/runs/*)               │    │
+│  │  WebSocket (/ws/graph/*, /ws/dashboard)              │    │
+│  └──────────────────────┬───────────────────────────────┘    │
+│                         ▼                                    │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │              调度引擎层                                │    │
+│  │  RunManager (运行状态) → PipelineExecutor (DAG 调度)  │    │
+│  │  Kahn 拓扑排序 → asyncio.gather 并行执行              │    │
+│  └──────────────────────┬───────────────────────────────┘    │
+│                         ▼                                    │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │              执行层                                    │    │
+│  │  Shell → subprocess  |  Script → subprocess           │    │
+│  │  Function → importlib.import_module                   │    │
+│  │  stdout/stderr 逐行实时读取 → on_log 回调             │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                                                              │
+│  存储：~/.qgraph/graphs/*.json + ~/.qgraph/logs/*.json       │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-按顺序执行，上一节点输出作为下一节点输入。
-
-#### 3.4.2 并行执行（MVP）
-
-```
-    → [A] →
-[输入]          → [合并]
-    → [B] →
-```
-
-多节点同时处理，汇聚到下一节点。
-
-#### 3.4.3 条件分支（后续迭代）
-
-#### 3.4.4 循环（后续迭代）
+| 层 | 技术选型 |
+|-----|----------|
+| 前端 | React 18 + TypeScript + React Flow (@xyflow/react) + Vite 5 |
+| 后端 | Python 3.10+ + FastAPI + asyncio + uvicorn |
+| CLI | click + rich |
+| 存储 | JSON 文件 |
+| 打包 | pyproject.toml + hatchling |
 
 ---
 
-## 4. 交互设计
+## 开发指南
 
-### 4.1 画布操作
-
-- **拖拽**：从节点面板拖拽节点到画布
-- **复制**：复制节点等
-- **移动**：拖动画布上的节点
-- **连线**：从输出端口拖线到输入端口
-- **删除**：选中节点/连线，按 Delete 删除
-- **缩放**：鼠标滚轮缩放画布
-- **平移**：按住空格拖动画布
-
-### 4.2 节点配置
-
-- 选中节点后，右侧弹出配置面板
-- 支持参数输入、选择、开关等控件
-- 实时预览输入/输出
-
-### 4.3 执行控制（MVP）
-
-- **运行**：执行整个 Pipeline
-- **暂停/停止**：控制执行流程
-- **实时日志**：WebSocket 推送节点执行日志
-
-### 4.4 执行控制（后续迭代）
-
-- **单步调试**：逐节点执行，观察每步输出
-- **任务进度监控**：详细的进度条和状态追踪
-
----
-
-## 5. CLI 设计
+### 环境搭建
 
 ```bash
-# 服务管理
-qgraph serve                    # 启动 Web UI（默认 http://localhost:9800）
-qgraph serve --port 9801        # 指定端口
+# 克隆仓库
+git clone <repo-url>
+cd QGraph
 
-# Graph 管理
-qgraph list                     # 列出所有 graph
-qgraph create <name>            # 创建新 graph（自动打开 Web UI）
-qgraph edit <name>              # Web UI 打开编辑指定 graph
-qgraph delete <name>            # 删除 graph
-qgraph export <name> -o file    # 导出 graph JSON
-qgraph import <file>            # 导入 graph JSON
+# 安装 Python 包（editable 模式）
+pip install -e .
 
-# 执行管理
-qgraph run <name>               # 执行 graph（前台，实时输出日志）
-qgraph run <name> -d            # 后台运行
-qgraph ps                       # 列出所有正在运行的 graph
-qgraph logs <run-id>            # 查看运行日志
-qgraph stop <run-id>            # 停止运行中的 graph
+# 安装前端依赖
+cd web && npm install && cd ..
+```
+
+### 开发模式
+
+```bash
+# 同时启动后端 + 前端 dev server
+python dev.py
+
+# 或分别启动：
+qgraph serve                    # 后端（端口 9800）
+cd web && npm run dev           # 前端（端口 5173，proxy 到 9800）
+```
+
+### 代码检查
+
+```bash
+# Python lint
+ruff check src/
+
+# TypeScript 类型检查
+cd web && npx tsc --noEmit
+```
+
+### 前端构建
+
+```bash
+cd web && npm run build
+# 输出到 src/qgraph/web/dist/，通过 qgraph serve 直接 serve
+```
+
+### 项目结构
+
+```
+QGraph/
+├── src/qgraph/                 # Python 后端
+│   ├── cli.py                  # CLI 入口（11 个命令）
+│   ├── core/                   # 模型 + 存储
+│   │   ├── models.py           # Pydantic 数据模型
+│   │   └── storage.py          # JSON 文件读写
+│   ├── engine/                 # 执行引擎
+│   │   ├── executor.py         # DAG 拓扑排序 + 并行调度
+│   │   └── run_manager.py      # 运行状态追踪 + 日志持久化
+│   └── server/                 # Web 服务
+│       ├── app.py              # FastAPI app 工厂
+│       ├── api.py              # REST API 路由
+│       └── ws.py               # WebSocket 管理
+├── web/                        # React 前端
+│   └── src/
+│       ├── App.tsx             # 路由：Dashboard / EditorView
+│       ├── api.ts              # 后端 API 封装
+│       ├── types.ts            # TypeScript 类型
+│       └── components/         # UI 组件
+│           ├── Dashboard.tsx   # Pipeline 管理面板
+│           ├── PipelineNode.tsx # 自定义画布节点
+│           ├── Sidebar.tsx     # 左侧节点面板
+│           ├── Toolbar.tsx     # 顶部工具栏
+│           ├── ConfigPanel.tsx # 右侧配置面板
+│           └── LogPanel.tsx    # 底部日志面板
+├── demo/                       # 测试脚本（10 个）
+├── pyproject.toml              # Python 包配置
+└── dev.py                      # 开发启动脚本
 ```
 
 ---
 
-## 6. MVP 范围
+## License
 
-| 功能 | 状态 |
-|------|------|
-| 画布：节点拖拽、连线、删除、缩放、平移 | ✅ MVP |
-| 节点配置面板（右侧） | ✅ MVP |
-| 节点类型：Shell Command / Python Script / Python Function | ✅ MVP |
-| 串行执行 | ✅ MVP |
-| 并行执行 | ✅ MVP |
-| 实时日志 WebSocket 推送 | ✅ MVP |
-| Graph 保存/加载（JSON） | ✅ MVP |
-| CLI 命令行管理和运行 | ✅ MVP |
-| pip 包分发 | ✅ MVP |
-| 明暗双主题 | ✅ MVP |
-| 基础进度监控 | ✅ MVP |
-| 条件分支 | ❌ 后续迭代 |
-| 循环 | ❌ 后续迭代 |
-| 单步调试 | ❌ 后续迭代 |
-| 详细进度监控 | ❌ 后续迭代 |
-| 结构化 JSON 数据流 | ❌ 后续迭代 |
-
----
-
-## 7. 开发计划
-
-### Phase 1: 核心框架搭建
-- Python 项目结构 + CLI 框架（click）
-- FastAPI 服务 + 静态文件 serve
-- React 项目 + React Flow 基础画布
-- 前后端联通
-
-### Phase 2: 节点编辑器
-- 节点拖拽、连线、删除
-- 节点配置面板（右侧）
-- Graph 保存/加载
-- 节点类型实现（Shell/Python Script/Python Function）
-
-### Phase 3: 执行引擎
-- DAG 解析 + 拓扑排序
-- 串行/并行调度器
-- asyncio.subprocess 进程管理
-- WebSocket 日志实时推送
-- 数据传递（环境变量 + 模板替换）
-
-### Phase 4: CLI + 打包
-- 完整 CLI 命令实现
-- pip 包打包（hatchling）
-- 明暗双主题
-- 基础进度监控
+MIT

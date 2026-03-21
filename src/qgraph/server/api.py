@@ -94,3 +94,10 @@ async def stop_run(run_id: str) -> dict[str, str]:
     if not await run_manager.stop_run(run_id):
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found or already finished")
     return {"status": "stopped"}
+
+
+@router.post("/runs/{run_id}/delete")
+async def delete_run_log(run_id: str) -> dict[str, str]:
+    if not RunManager.delete_log(run_id):
+        raise HTTPException(status_code=404, detail=f"Log '{run_id}' not found")
+    return {"status": "ok"}

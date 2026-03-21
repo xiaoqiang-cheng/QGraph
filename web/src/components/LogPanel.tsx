@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 
 interface LogEntry {
   node_id: string
@@ -8,69 +8,150 @@ interface LogEntry {
 
 interface LogPanelProps {
   logs: LogEntry[]
+  isRunning: boolean
   onClose: () => void
+  onClear: () => void
 }
 
-export default function LogPanel({ logs, onClose }: LogPanelProps) {
+export default function LogPanel({ logs, isRunning, onClose, onClear }: LogPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState(240)
+  const [autoScroll, setAutoScroll] = useState(true)
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs.length])
+    if (autoScroll) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [logs.length, autoScroll])
+
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    setAutoScroll(atBottom)
+  }, [])
+
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragRef.current = { startY: e.clientY, startH: height }
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return
+      const delta = dragRef.current.startY - ev.clientY
+      setHeight(Math.max(120, Math.min(600, dragRef.current.startH + delta)))
+    }
+    const onUp = () => {
+      dragRef.current = null
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [height])
+
+  const btnStyle: React.CSSProperties = {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    color: 'var(--text-muted)',
+    fontSize: 12,
+    padding: '2px 8px',
+    borderRadius: 4,
+  }
 
   return (
     <div style={{
-      height: 220,
+      height,
       background: 'var(--bg-secondary)',
       borderTop: '1px solid var(--border)',
       display: 'flex',
       flexDirection: 'column',
       flexShrink: 0,
+      position: 'relative',
     }}>
+      <div
+        onMouseDown={onDragStart}
+        style={{
+          position: 'absolute',
+          top: -3,
+          left: 0,
+          right: 0,
+          height: 6,
+          cursor: 'ns-resize',
+          zIndex: 10,
+        }}
+      />
       <div style={{
-        padding: '8px 16px',
+        padding: '6px 16px',
         borderBottom: '1px solid var(--border)',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        gap: 8,
+        flexShrink: 0,
       }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>Logs</span>
+        {isRunning && (
+          <span style={{
+            fontSize: 10,
+            padding: '2px 8px',
+            borderRadius: 10,
+            background: 'rgba(245,158,11,0.15)',
+            color: 'var(--warning)',
+            fontWeight: 600,
+          }}>RUNNING</span>
+        )}
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          {logs.length} lines
+        </span>
+        <div style={{ flex: 1 }} />
+        {!autoScroll && (
+          <button
+            onClick={() => {
+              setAutoScroll(true)
+              bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+            }}
+            style={{ ...btnStyle, color: 'var(--accent)' }}
+          >↓ Follow</button>
+        )}
+        <button onClick={onClear} style={btnStyle}>Clear</button>
         <button
           onClick={onClose}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-muted)',
-            fontSize: 16,
-            padding: '2px 6px',
-          }}
+          style={{ ...btnStyle, fontSize: 16, padding: '0 4px' }}
         >✕</button>
       </div>
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: '8px 16px',
-        fontFamily: 'Consolas, "Courier New", monospace',
-        fontSize: 12,
-        lineHeight: 1.6,
-      }}>
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '8px 16px',
+          fontFamily: 'Consolas, "Courier New", monospace',
+          fontSize: 12,
+          lineHeight: 1.6,
+        }}
+      >
         {logs.length === 0 && (
           <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
-            Waiting for logs...
+            {isRunning ? 'Waiting for logs...' : 'No logs. Click ▶ Run to start.'}
           </div>
         )}
         {logs.map((entry, i) => {
-          const isError = entry.message.includes('Failed') || entry.message.includes('ERROR') || entry.message.includes('[stderr]')
-          const isSuccess = entry.message.includes('Completed') || entry.message.includes('successfully')
+          const msg = entry.message
+          const isError = msg.includes('Failed') || msg.includes('ERROR') || msg.includes('[stderr]')
+          const isSuccess = msg.includes('Completed') || msg.includes('successfully')
           return (
             <div key={i} style={{
               color: isError ? 'var(--error)' : isSuccess ? 'var(--success)' : 'var(--text-primary)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
             }}>
               <span style={{ color: 'var(--text-muted)', marginRight: 8 }}>
-                [{entry.node_id.substring(0, 12)}]
+                [{entry.node_id.substring(0, 15)}]
               </span>
-              {entry.message}
+              {msg}
             </div>
           )
         })}

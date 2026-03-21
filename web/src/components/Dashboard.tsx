@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api'
-import type { GraphSummary, RunInfo, WsMessage } from '../types'
+import type { GraphSummary, RunInfo, RunHistoryEntry, RunLogData, WsMessage } from '../types'
 
 interface DashboardProps {
   onOpenGraph: (name: string) => void
@@ -8,11 +8,168 @@ interface DashboardProps {
   onToggleTheme: () => void
 }
 
+function LogViewer({ runId, onClose }: { runId: string; onClose: () => void }) {
+  const [logData, setLogData] = useState<RunLogData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      try {
+        const data = await api.getRunLogs(runId)
+        if (active) { setLogData(data); setLoading(false) }
+      } catch (err) {
+        if (active) { setError(String(err)); setLoading(false) }
+      }
+    }
+    load()
+    return () => { active = false }
+  }, [runId])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logData])
+
+  const statusColor = (s: string) =>
+    s === 'completed' ? 'var(--success)' : s === 'failed' || s.startsWith('error') ? 'var(--error)' : 'var(--warning)'
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.5)',
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '85vw',
+          maxWidth: 900,
+          height: '75vh',
+          background: 'var(--bg-secondary)',
+          borderRadius: 12,
+          border: '1px solid var(--border)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+        }}
+      >
+        <div style={{
+          padding: '12px 20px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexShrink: 0,
+        }}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>Run Logs</span>
+          {logData && (
+            <>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{logData.graph_name}</span>
+              <span style={{
+                fontSize: 11,
+                padding: '2px 8px',
+                borderRadius: 4,
+                background: logData.status === 'completed' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
+                color: statusColor(logData.status),
+                fontWeight: 500,
+              }}>{logData.status}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                {logData.logs.length} lines
+              </span>
+            </>
+          )}
+          <div style={{ flex: 1 }} />
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--text-muted)',
+              fontSize: 18,
+              padding: '2px 6px',
+            }}
+          >✕</button>
+        </div>
+
+        {logData && (
+          <div style={{
+            padding: '8px 20px',
+            borderBottom: '1px solid var(--border)',
+            display: 'flex',
+            gap: 16,
+            fontSize: 11,
+            color: 'var(--text-muted)',
+            flexShrink: 0,
+            flexWrap: 'wrap',
+          }}>
+            <span>ID: {logData.run_id}</span>
+            {logData.started_at && <span>Started: {new Date(logData.started_at).toLocaleString()}</span>}
+            {logData.finished_at && <span>Finished: {new Date(logData.finished_at).toLocaleString()}</span>}
+            <span>
+              Nodes: {Object.entries(logData.node_statuses).map(([nid, st]) => (
+                <span key={nid} style={{
+                  marginLeft: 4,
+                  padding: '0 4px',
+                  borderRadius: 3,
+                  background: st === 'success' ? 'rgba(34,197,94,0.12)' : st === 'failed' ? 'rgba(239,68,68,0.12)' : 'rgba(107,114,128,0.1)',
+                  color: st === 'success' ? 'var(--success)' : st === 'failed' ? 'var(--error)' : 'var(--text-muted)',
+                }}>{nid.substring(0, 12)}</span>
+              ))}
+            </span>
+          </div>
+        )}
+
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '12px 20px',
+          fontFamily: 'Consolas, "Courier New", monospace',
+          fontSize: 12,
+          lineHeight: 1.7,
+        }}>
+          {loading && <div style={{ color: 'var(--text-muted)' }}>Loading...</div>}
+          {error && <div style={{ color: 'var(--error)' }}>Error: {error}</div>}
+          {logData && logData.logs.length === 0 && (
+            <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>No log output.</div>
+          )}
+          {logData?.logs.map((entry, i) => {
+            const line = typeof entry === 'string' ? entry : `[${entry.node_id}] ${entry.message}`
+            const isErr = line.includes('Failed') || line.includes('ERROR') || line.includes('[stderr]')
+            const isOk = line.includes('Completed') || line.includes('successfully')
+            return (
+              <div key={i} style={{
+                color: isErr ? 'var(--error)' : isOk ? 'var(--success)' : 'var(--text-primary)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}>{line}</div>
+            )
+          })}
+          <div ref={bottomRef} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: DashboardProps) {
   const [graphs, setGraphs] = useState<GraphSummary[]>([])
   const [runs, setRuns] = useState<RunInfo[]>([])
+  const [history, setHistory] = useState<RunHistoryEntry[]>([])
   const [newGraphName, setNewGraphName] = useState('')
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [deletingRun, setDeletingRun] = useState<string | null>(null)
+  const [viewingLog, setViewingLog] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
     try {
@@ -24,14 +181,21 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
     }
   }, [])
 
-  useEffect(() => {
-    loadData()
-    const interval = setInterval(loadData, 3000)
-    return () => clearInterval(interval)
-  }, [loadData])
+  const loadHistory = useCallback(async () => {
+    try {
+      setHistory(await api.listRunHistory())
+    } catch { /* */ }
+  }, [])
 
   useEffect(() => {
-    const wsUrl = `ws://${window.location.hostname}:9800/ws/dashboard`
+    loadData()
+    loadHistory()
+    const interval = setInterval(() => { loadData(); loadHistory() }, 5000)
+    return () => clearInterval(interval)
+  }, [loadData, loadHistory])
+
+  useEffect(() => {
+    const wsUrl = `ws://${window.location.host}/ws/dashboard`
     let ws: WebSocket | null = null
 
     function connect() {
@@ -40,6 +204,7 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
         const msg: WsMessage = JSON.parse(ev.data)
         if (msg.type === 'run_update') {
           loadData()
+          loadHistory()
         } else if (msg.type === 'ping') {
           ws?.send(JSON.stringify({ type: 'pong' }))
         }
@@ -49,7 +214,7 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
     connect()
 
     return () => { ws?.close() }
-  }, [loadData])
+  }, [loadData, loadHistory])
 
   const handleCreate = async () => {
     const name = newGraphName.trim()
@@ -87,15 +252,20 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
     await loadData()
   }
 
+  const handleDeleteRun = useCallback(async (runId: string) => {
+    setDeletingRun(runId)
+    try {
+      await api.deleteRunLog(runId)
+    } catch (err) {
+      alert(`Delete failed: ${err}`)
+    } finally {
+      setDeletingRun(null)
+      await loadHistory()
+    }
+  }, [loadHistory])
+
   const activeRuns = runs.filter(r => r.status === 'running')
   const recentRuns = runs.filter(r => r.status !== 'running')
-
-  const cardStyle: React.CSSProperties = {
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border)',
-    borderRadius: 8,
-    padding: 16,
-  }
 
   const btnStyle: React.CSSProperties = {
     padding: '6px 12px',
@@ -108,204 +278,377 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
     color: 'var(--text-primary)',
   }
 
+  const statusColor = (s: string) =>
+    s === 'completed' ? 'var(--success)' : s === 'failed' ? 'var(--error)' : 'var(--warning)'
+
+  const statusIcon = (s: string) =>
+    s === 'completed' ? '✓' : s === 'failed' ? '✗' : '⟳'
+
   return (
     <div style={{
       width: '100vw',
       height: '100vh',
       background: 'var(--bg-primary)',
-      overflow: 'auto',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
     }}>
+      {viewingLog && <LogViewer runId={viewingLog} onClose={() => setViewingLog(null)} />}
+
       <div style={{
-        maxWidth: 960,
-        margin: '0 auto',
-        padding: '32px 24px',
+        padding: '16px 24px',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        flexShrink: 0,
+        background: 'var(--bg-secondary)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 32 }}>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: 'var(--accent)', margin: 0 }}>
-            QGraph
-          </h1>
-          <span style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 12 }}>
-            Pipeline Dashboard
-          </span>
-          <button
-            onClick={onToggleTheme}
-            style={{ ...btnStyle, marginLeft: 'auto' }}
-          >
-            {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
-          </button>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent)', margin: 0 }}>
+          QGraph
+        </h1>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          Pipeline Dashboard
+        </span>
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            value={newGraphName}
+            onChange={e => setNewGraphName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleCreate()}
+            placeholder="New pipeline name..."
+            style={{
+              padding: '6px 12px',
+              background: 'var(--bg-primary)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              color: 'var(--text-primary)',
+              fontSize: 12,
+              outline: 'none',
+              width: 180,
+            }}
+          />
+          <button onClick={handleCreate} style={{
+            ...btnStyle,
+            background: 'var(--accent)',
+            color: '#fff',
+            border: 'none',
+          }}>+ Create</button>
+        </div>
+        <button
+          onClick={onToggleTheme}
+          style={{ ...btnStyle, marginLeft: 4 }}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
+      </div>
+
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          width: 340,
+          flexShrink: 0,
+          borderRight: '1px solid var(--border)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            padding: '12px 16px 8px',
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--text-secondary)',
+            flexShrink: 0,
+          }}>
+            Pipelines ({graphs.length})
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 12px' }}>
+            {graphs.length === 0 ? (
+              <div style={{
+                padding: 24,
+                textAlign: 'center',
+                color: 'var(--text-muted)',
+                fontSize: 13,
+              }}>
+                No pipelines yet.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {graphs.map(g => {
+                  const graphRuns = runs.filter(r => r.graph_name === g.name && r.status === 'running')
+                  const isDeleting = deleting === g.name
+                  return (
+                    <div key={g.name} style={{
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      padding: '10px 12px',
+                      opacity: isDeleting ? 0.5 : 1,
+                      transition: 'opacity 0.2s',
+                    }}>
+                      <div
+                        style={{ cursor: 'pointer', marginBottom: 6 }}
+                        onClick={() => onOpenGraph(g.name)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontWeight: 600, fontSize: 14 }}>{g.name}</span>
+                          {graphRuns.length > 0 && (
+                            <span style={{
+                              fontSize: 9,
+                              padding: '1px 6px',
+                              borderRadius: 10,
+                              background: 'rgba(245,158,11,0.15)',
+                              color: 'var(--warning)',
+                              fontWeight: 600,
+                            }}>RUNNING</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+                          {g.node_count} nodes · {new Date(g.updated_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          onClick={() => onOpenGraph(g.name)}
+                          style={{
+                            ...btnStyle, fontSize: 11, padding: '3px 8px',
+                            color: 'var(--accent)', flex: 1,
+                          }}
+                        >Edit</button>
+                        <button
+                          onClick={() => handleRun(g.name)}
+                          style={{
+                            ...btnStyle, fontSize: 11, padding: '3px 8px',
+                            background: 'var(--success)', color: '#fff', border: 'none', flex: 1,
+                          }}
+                        >▶ Run</button>
+                        <button
+                          disabled={isDeleting}
+                          onClick={() => handleDelete(g.name)}
+                          style={{
+                            ...btnStyle, fontSize: 11, padding: '3px 8px',
+                            color: 'var(--error)',
+                          }}
+                        >{isDeleting ? '...' : 'Del'}</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
-        {activeRuns.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12, color: 'var(--warning)' }}>
-              ⟳ Running ({activeRuns.length})
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {activeRuns.map(run => (
-                <div key={run.run_id} style={{
-                  ...cardStyle,
-                  borderColor: 'var(--warning)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 16,
-                }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{run.graph_name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                      {run.run_id} · {run.elapsed_seconds}s
-                      {run.current_node && (
-                        <span style={{ color: 'var(--warning)', marginLeft: 8 }}>
-                          ⟳ {run.current_node}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
-                      {Object.entries(run.node_statuses).map(([nodeId, status]) => (
-                        <span key={nodeId} style={{
-                          fontSize: 10,
-                          padding: '2px 6px',
-                          borderRadius: 4,
-                          background: status === 'success' ? 'rgba(34,197,94,0.15)'
-                            : status === 'running' ? 'rgba(245,158,11,0.15)'
-                            : status === 'failed' ? 'rgba(239,68,68,0.15)'
-                            : 'rgba(107,114,128,0.1)',
-                          color: status === 'success' ? 'var(--success)'
-                            : status === 'running' ? 'var(--warning)'
-                            : status === 'failed' ? 'var(--error)'
-                            : 'var(--text-muted)',
-                        }}>
-                          {nodeId.substring(0, 15)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => onOpenGraph(run.graph_name)}
-                    style={{ ...btnStyle, background: 'var(--accent)', color: '#fff', border: 'none' }}
-                  >View</button>
-                  <button
-                    onClick={() => handleStop(run.run_id)}
-                    style={{ ...btnStyle, background: 'var(--error)', color: '#fff', border: 'none' }}
-                  >Stop</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div style={{ marginBottom: 24 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Pipelines</h2>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            <input
-              value={newGraphName}
-              onChange={e => setNewGraphName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleCreate()}
-              placeholder="New pipeline name..."
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                color: 'var(--text-primary)',
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}>
+          {activeRuns.length > 0 && (
+            <div style={{
+              borderBottom: '1px solid var(--border)',
+              flexShrink: 0,
+              maxHeight: '35%',
+              display: 'flex',
+              flexDirection: 'column',
+            }}>
+              <div style={{
+                padding: '12px 16px 8px',
                 fontSize: 13,
-                outline: 'none',
-              }}
-            />
-            <button onClick={handleCreate} style={{
-              ...btnStyle,
-              background: 'var(--accent)',
-              color: '#fff',
-              border: 'none',
-              padding: '8px 16px',
-            }}>+ Create</button>
-          </div>
-
-          {graphs.length === 0 ? (
-            <div style={{ ...cardStyle, textAlign: 'center', color: 'var(--text-muted)' }}>
-              No pipelines yet. Create one above.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {graphs.map(g => {
-                const graphRuns = runs.filter(r => r.graph_name === g.name && r.status === 'running')
-                const isDeleting = deleting === g.name
-                return (
-                  <div key={g.name} style={{
-                    ...cardStyle,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 16,
-                    opacity: isDeleting ? 0.5 : 1,
-                    transition: 'opacity 0.2s',
-                  }}>
-                    <div
-                      style={{ flex: 1, cursor: 'pointer' }}
-                      onClick={() => onOpenGraph(g.name)}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontWeight: 600, fontSize: 15 }}>{g.name}</span>
-                        {graphRuns.length > 0 && (
-                          <span style={{
-                            fontSize: 10,
-                            padding: '2px 8px',
-                            borderRadius: 10,
-                            background: 'rgba(245,158,11,0.15)',
-                            color: 'var(--warning)',
-                            fontWeight: 600,
-                          }}>RUNNING</span>
-                        )}
+                fontWeight: 600,
+                color: 'var(--warning)',
+                flexShrink: 0,
+              }}>
+                ⟳ Running ({activeRuns.length})
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {activeRuns.map(run => (
+                    <div key={run.run_id} style={{
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--warning)',
+                      borderRadius: 8,
+                      padding: '10px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{run.graph_name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {run.elapsed_seconds}s
+                          {run.current_node && (
+                            <span style={{ color: 'var(--warning)', marginLeft: 6 }}>
+                              ⟳ {run.current_node}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 3, marginTop: 5, flexWrap: 'wrap' }}>
+                          {Object.entries(run.node_statuses).map(([nid, st]) => (
+                            <span key={nid} style={{
+                              fontSize: 9,
+                              padding: '1px 5px',
+                              borderRadius: 3,
+                              background: st === 'success' ? 'rgba(34,197,94,0.15)'
+                                : st === 'running' ? 'rgba(245,158,11,0.15)'
+                                : st === 'failed' ? 'rgba(239,68,68,0.15)'
+                                : 'rgba(107,114,128,0.1)',
+                              color: st === 'success' ? 'var(--success)'
+                                : st === 'running' ? 'var(--warning)'
+                                : st === 'failed' ? 'var(--error)'
+                                : 'var(--text-muted)',
+                            }}>{nid.substring(0, 12)}</span>
+                          ))}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                        {g.node_count} nodes · updated {new Date(g.updated_at).toLocaleString()}
-                      </div>
+                      <button
+                        onClick={() => onOpenGraph(run.graph_name)}
+                        style={{ ...btnStyle, fontSize: 11, padding: '4px 10px', color: 'var(--accent)' }}
+                      >View</button>
+                      <button
+                        onClick={() => handleStop(run.run_id)}
+                        style={{
+                          ...btnStyle, fontSize: 11, padding: '4px 10px',
+                          background: 'var(--error)', color: '#fff', border: 'none',
+                        }}
+                      >Stop</button>
                     </div>
-                    <button
-                      onClick={() => handleRun(g.name)}
-                      style={{ ...btnStyle, background: 'var(--success)', color: '#fff', border: 'none' }}
-                    >▶ Run</button>
-                    <button
-                      disabled={isDeleting}
-                      onClick={() => handleDelete(g.name)}
-                      style={{ ...btnStyle, color: 'var(--error)' }}
-                    >{isDeleting ? 'Deleting...' : 'Delete'}</button>
-                  </div>
-                )
-              })}
+                  ))}
+                </div>
+              </div>
             </div>
           )}
-        </div>
 
-        {recentRuns.length > 0 && (
-          <div>
-            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Recent Runs</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {recentRuns.slice(0, 10).map(run => (
-                <div key={run.run_id} style={{
-                  ...cardStyle,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 16,
-                  opacity: 0.7,
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '12px 16px 8px',
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-secondary)',
+              flexShrink: 0,
+            }}>
+              Execution History ({history.length})
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 12px' }}>
+              {history.length === 0 && recentRuns.length === 0 ? (
+                <div style={{
+                  padding: 32,
+                  textAlign: 'center',
+                  color: 'var(--text-muted)',
+                  fontSize: 13,
                 }}>
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontWeight: 500 }}>{run.graph_name}</span>
-                    <span style={{
-                      fontSize: 12,
-                      marginLeft: 8,
-                      color: run.status === 'completed' ? 'var(--success)' : 'var(--error)',
-                    }}>
-                      {run.status}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    {run.elapsed_seconds}s
-                  </span>
+                  No execution history yet. Run a pipeline to see results here.
                 </div>
-              ))}
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {recentRuns.map(run => (
+                    <div key={`mem-${run.run_id}`} style={{
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      padding: '8px 12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      cursor: 'pointer',
+                    }}
+                      onClick={() => setViewingLog(run.run_id)}
+                    >
+                      <span style={{
+                        fontSize: 12,
+                        color: run.status === 'completed' ? 'var(--success)' : 'var(--error)',
+                        flexShrink: 0,
+                      }}>{run.status === 'completed' ? '✓' : '✗'}</span>
+                      <span style={{ fontWeight: 500, fontSize: 12 }}>{run.graph_name}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{run.elapsed_seconds}s</span>
+                      <span style={{ fontSize: 10, color: 'var(--accent)', marginLeft: 'auto' }}>Logs →</span>
+                    </div>
+                  ))}
+                  {history.slice(0, 50).map(entry => {
+                    const isDel = deletingRun === entry.run_id
+                    return (
+                      <div key={entry.run_id} style={{
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 6,
+                        padding: '8px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        opacity: isDel ? 0.4 : 1,
+                        transition: 'opacity 0.15s',
+                      }}>
+                        <span style={{
+                          fontSize: 12,
+                          color: statusColor(entry.status),
+                          flexShrink: 0,
+                        }}>{statusIcon(entry.status)}</span>
+                        <div
+                          style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+                          onClick={() => setViewingLog(entry.run_id)}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontWeight: 500, fontSize: 12 }}>{entry.graph_name}</span>
+                            <span style={{
+                              fontSize: 10,
+                              padding: '0 5px',
+                              borderRadius: 3,
+                              background: entry.status === 'completed' ? 'rgba(34,197,94,0.1)'
+                                : entry.status === 'failed' ? 'rgba(239,68,68,0.1)'
+                                : 'rgba(107,114,128,0.08)',
+                              color: statusColor(entry.status),
+                            }}>{entry.status}</span>
+                            <span style={{
+                              fontSize: 10,
+                              color: 'var(--accent)',
+                              marginLeft: 'auto',
+                              flexShrink: 0,
+                            }}>Logs →</span>
+                          </div>
+                          <div style={{
+                            fontSize: 10,
+                            color: 'var(--text-muted)',
+                            marginTop: 1,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {entry.started_at ? new Date(entry.started_at).toLocaleString() : entry.run_id}
+                            <span style={{ marginLeft: 6 }}>{entry.log_count} lines</span>
+                          </div>
+                        </div>
+                        <button
+                          disabled={isDel}
+                          onClick={() => handleDeleteRun(entry.run_id)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--text-muted)',
+                            fontSize: 12,
+                            padding: '2px 4px',
+                            opacity: 0.5,
+                            flexShrink: 0,
+                          }}
+                          title="Delete this run log"
+                        >{isDel ? '...' : '✕'}</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

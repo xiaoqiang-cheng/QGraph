@@ -12,18 +12,25 @@
   - API 层增加 `OSError` 捕获，返回 500 错误信息
   - 前端使用 POST `/graphs/{name}/delete` 路由（避免 DELETE 方法被拦截）
 
-- [ ] **运行日志未持久化**
-  - 症状：`run_manager._save_log()` 写入 `~/.qgraph/logs/` 时报 PermissionError
-  - 代码已实现（run_manager.py），但 Windows 下写入失败
-  - `_save_log` 中有 try/except + print flush 日志，但之前终端编码问题导致无法看到输出
-  - 建议：迁移后重新测试，可能是中文路径环境下的权限问题
+- [x] ~~**运行日志未持久化**~~ ✅ 已修复
+  - 根因：中文路径环境导致 PermissionError，迁移到英文路径后正常
+  - 验证：`_save_log()` 正常写入 `~/.qgraph/logs/`，API `/api/runs/history` 正常返回
+
+- [x] ~~**Run status 判断不准确**~~ ✅ 已修复
+  - 根因：`executor.execute()` 节点失败时不抛异常，`_run()` 总是设为 `"completed"`
+  - 修复：检查 executor 返回的 results，有任何节点 FAILED 则 status 设为 `"failed"`
 
 ---
 
 ## 🟡 待完善功能（MVP 范围内）
 
-- [ ] **`qgraph logs <run_id>` 命令**：CLI 代码已实现，依赖日志持久化修复
-- [ ] **Web UI 实时日志面板**：WebSocket 推送已实现，编辑器中 LogPanel 组件已存在
+- [x] ~~**`qgraph logs <run_id>` 命令**~~ ✅ 已验证可用（依赖日志持久化，已修复）
+- [x] ~~**Web UI 实时日志面板**~~ ✅ 已完成
+  - 可拖拽调整高度（120px ~ 600px）
+  - 自动滚动跟随 + 手动滚动暂停 + "↓ Follow" 按钮恢复
+  - RUNNING 状态标签 + 日志行数统计
+  - Clear 清空按钮
+  - 长文本自动换行（`pre-wrap` + `break-all`）
 - [ ] **连线数据传递**：当前连线只表示执行依赖，不传递实际数据。需实现：
   - 上游节点 env_vars / stdout 输出 → 自动注入为下游节点的环境变量
   - 模板替换语法 `{{node_name.output.key}}`
@@ -33,7 +40,11 @@
   - 如果当前目录没有 `.qgraph/`，使用 `~/.qgraph/graphs/` 全局存储
   - 新增 `qgraph init` 命令在当前目录初始化 `.qgraph/`
   - 日志/运行历史保持在 `~/.qgraph/logs/`
-- [ ] **前端 Build → pip 打包**：`npm run build` 输出到 `src/qgraph/web/dist/`，通过 `qgraph serve` 直接 serve 静态文件
+- [x] ~~**前端 Build → pip 打包**~~ ✅ 已完成
+  - `npm run build` 输出到 `src/qgraph/web/dist/`
+  - `pyproject.toml` 添加 `force-include` 将 dist/ 打入 wheel
+  - `qgraph serve` 单端口同时 serve API + 静态文件
+  - WebSocket URL 改为 `window.location.host` 动态适配端口
 
 ---
 
@@ -45,6 +56,7 @@
 - [ ] 单步调试：逐节点执行，观察每步输出
 
 ### Phase 2+: 增强功能
+- [ ] 日志预览增强：全屏模式、关键字搜索、按节点过滤日志
 - [ ] 详细进度监控（进度条、耗时统计）
 - [ ] 结构化 JSON 数据流（节点间传递 JSON 对象）
 - [ ] 节点复制 / 粘贴
@@ -84,3 +96,6 @@
 - [x] 编辑器 Sidebar logo 可点击返回 Dashboard
 - [x] Demo 脚本集合（10 个测试脚本）
 - [x] Demo 流水线图（ml-training-pipeline，7 个节点，串行+并行）
+- [x] 日志格式精简：`logs` 数组从 `[{node_id, message, time}]` 改为 `["[node_id] message"]`，体积 -59%，向下兼容旧格式
+- [x] `qgraph ps -a` 离线模式：服务器未运行时自动读取本地日志文件展示历史
+- [x] `dev.py` 进程管理修复：后端异常退出时自动清理前端 Vite 进程

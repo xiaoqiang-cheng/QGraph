@@ -1,5 +1,5 @@
-import { memo } from 'react'
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { memo, useEffect } from 'react'
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import type { NodeConfig, NodeType, NodeStatus } from '../types'
 import { NODE_TYPE_LABELS, NODE_TYPE_COLORS } from '../types'
 
@@ -10,6 +10,7 @@ interface PipelineNodeData {
   config: NodeConfig
   inputCount: number
   outputCount: number
+  layoutDirection: 'LR' | 'TB'
 }
 
 const STATUS_INDICATORS: Record<NodeStatus, { icon: string; color: string; animate?: boolean }> = {
@@ -22,10 +23,19 @@ const STATUS_INDICATORS: Record<NodeStatus, { icon: string; color: string; anima
   cancelled: { icon: '⊗', color: 'var(--text-muted)' },
 }
 
-function PipelineNode({ data, selected }: NodeProps & { data: PipelineNodeData }) {
+function PipelineNode({ id, data, selected }: NodeProps & { data: PipelineNodeData }) {
   const color = NODE_TYPE_COLORS[data.nodeType]
   const indicator = STATUS_INDICATORS[data.status]
   const isRunning = data.status === 'running'
+  const isVertical = data.layoutDirection === 'TB'
+  const updateNodeInternals = useUpdateNodeInternals()
+
+  const targetPos = isVertical ? Position.Top : Position.Left
+  const sourcePos = isVertical ? Position.Bottom : Position.Right
+
+  useEffect(() => {
+    updateNodeInternals(id)
+  }, [id, data.layoutDirection, updateNodeInternals])
 
   return (
     <div
@@ -125,7 +135,7 @@ function PipelineNode({ data, selected }: NodeProps & { data: PipelineNodeData }
       {data.inputCount > 0 && (
         <Handle
           type="target"
-          position={Position.Left}
+          position={targetPos}
           id="in_0"
           style={{
             width: 10,
@@ -138,7 +148,7 @@ function PipelineNode({ data, selected }: NodeProps & { data: PipelineNodeData }
       {data.outputCount > 0 && (
         <Handle
           type="source"
-          position={Position.Right}
+          position={sourcePos}
           id="out_0"
           style={{
             width: 10,
@@ -152,4 +162,17 @@ function PipelineNode({ data, selected }: NodeProps & { data: PipelineNodeData }
   )
 }
 
-export default memo(PipelineNode)
+export default memo(PipelineNode, (prev, next) => {
+  const pd = prev.data as PipelineNodeData
+  const nd = next.data as PipelineNodeData
+  return (
+    pd.label === nd.label &&
+    pd.status === nd.status &&
+    pd.layoutDirection === nd.layoutDirection &&
+    pd.nodeType === nd.nodeType &&
+    pd.inputCount === nd.inputCount &&
+    pd.outputCount === nd.outputCount &&
+    pd.config === nd.config &&
+    prev.selected === next.selected
+  )
+})

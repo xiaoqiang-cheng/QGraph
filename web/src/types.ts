@@ -69,6 +69,25 @@ export interface WsMessage {
   run_id?: string
 }
 
+export interface RunHistoryEntry {
+  run_id: string
+  graph_name: string
+  status: string
+  started_at: string
+  finished_at: string | null
+  log_count: number
+}
+
+export interface RunLogData {
+  run_id: string
+  graph_name: string
+  status: string
+  started_at: string
+  finished_at: string | null
+  node_statuses: Record<string, string>
+  logs: (string | { node_id: string; message: string; time?: string })[]
+}
+
 export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   shell_command: 'Shell Command',
   python_script: 'Python Script',

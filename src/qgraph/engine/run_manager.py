@@ -23,7 +23,7 @@ class RunInfo:
     finished_at: float | None = None
     current_node: str | None = None
     node_statuses: dict[str, str] = field(default_factory=dict)
-    logs: list[dict[str, str]] = field(default_factory=list)
+    logs: list[str] = field(default_factory=list)
     executor: PipelineExecutor | None = None
     task: asyncio.Task | None = None
 
@@ -109,6 +109,17 @@ class RunManager:
                 continue
         return results
 
+    @staticmethod
+    def delete_log(run_id: str) -> bool:
+        log_path = get_logs_dir() / f"{run_id}.json"
+        if not log_path.exists():
+            return False
+        try:
+            log_path.unlink()
+        except OSError:
+            pass
+        return not log_path.exists()
+
     async def start_run(self, graph_name: str, graph_data: dict[str, Any]) -> str:
         self._counter += 1
         run_id = f"run_{graph_name}_{self._counter}_{int(time.time())}"
@@ -120,11 +131,7 @@ class RunManager:
         self._runs[run_id] = run_info
 
         async def on_log(gn: str, node_id: str, message: str):
-            run_info.logs.append({
-                "node_id": node_id,
-                "message": message,
-                "time": datetime.now(timezone.utc).isoformat(),
-            })
+            run_info.logs.append(f"[{node_id}] {message}")
             if self._on_log:
                 await self._on_log(gn, node_id, message, run_id)
 
@@ -142,8 +149,12 @@ class RunManager:
 
         async def _run():
             try:
-                await executor.execute(graph_data)
-                run_info.status = "completed"
+                results = await executor.execute(graph_data)
+                from qgraph.core.models import NodeStatus
+                has_failed = any(
+                    r.status == NodeStatus.FAILED for r in results.values()
+                )
+                run_info.status = "failed" if has_failed else "completed"
             except Exception as e:
                 run_info.status = f"error: {e}"
             finally:

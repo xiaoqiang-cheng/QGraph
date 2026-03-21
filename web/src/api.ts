@@ -1,4 +1,4 @@
-import type { GraphData, GraphSummary, RunInfo } from './types'
+import type { GraphData, GraphSummary, RunInfo, RunHistoryEntry, RunLogData } from './types'
 
 const BASE_URL = '/api'
 
@@ -40,6 +40,14 @@ export const api = {
     }),
 
   listRuns: () => request<RunInfo[]>('/runs'),
+
+  listRunHistory: () => request<RunHistoryEntry[]>('/runs/history'),
+
+  getRunLogs: (runId: string) =>
+    request<RunLogData>(`/runs/${encodeURIComponent(runId)}/logs`),
+
+  deleteRunLog: (runId: string) =>
+    request<{ status: string }>(`/runs/${encodeURIComponent(runId)}/delete`, { method: 'POST' }),
 
   stopRun: (runId: string) =>
     request<{ status: string }>(`/runs/${encodeURIComponent(runId)}/stop`, { method: 'POST' }),

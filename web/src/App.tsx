@@ -51,7 +51,7 @@ function createDefaultPorts(nodeType: NodeType) {
   return { inputs, outputs }
 }
 
-function nodeDataToFlowNode(data: NodeData): Node {
+function nodeDataToFlowNode(data: NodeData, layoutDirection: 'LR' | 'TB' = 'LR'): Node {
   return {
     id: data.id,
     type: 'pipeline',
@@ -63,6 +63,7 @@ function nodeDataToFlowNode(data: NodeData): Node {
       config: data.config,
       inputCount: data.inputs?.length || 0,
       outputCount: data.outputs?.length || 0,
+      layoutDirection,
     },
   }
 }
@@ -82,6 +83,7 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
   const [isSaving, setIsSaving] = useState(false)
   const [showLogs, setShowLogs] = useState(false)
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [layoutDirection, setLayoutDirection] = useState<'LR' | 'TB'>('LR')
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const reactFlowInstance = useRef<ReactFlowInstance<Node, Edge> | null>(null)
   const nodeDataMap = useRef<Map<string, NodeData>>(new Map())
@@ -92,7 +94,7 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
   const selectedNodeData = selectedNodeId ? nodeDataMap.current.get(selectedNodeId) || null : null
 
   useEffect(() => {
-    const wsUrl = `ws://${window.location.hostname}:9800/ws/graph/${graphName}`
+    const wsUrl = `ws://${window.location.host}/ws/graph/${graphName}`
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout>
 
@@ -177,9 +179,9 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
     }
     nodeDataMap.current.set(id, nodeData)
 
-    const flowNode = nodeDataToFlowNode(nodeData)
+    const flowNode = nodeDataToFlowNode(nodeData, layoutDirection)
     setNodes(nds => [...nds, flowNode])
-  }, [setNodes])
+  }, [setNodes, layoutDirection])
 
   const onConnect = useCallback((params: Connection) => {
     setEdges(eds => addEdge(params, eds))
@@ -304,7 +306,7 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
       if (data.nodes && data.nodes.length > 0) {
         nodeDataMap.current.clear()
         data.nodes.forEach(n => nodeDataMap.current.set(n.id, n))
-        setNodes(data.nodes.map(nodeDataToFlowNode))
+        setNodes(data.nodes.map(n => nodeDataToFlowNode(n, layoutDirection)))
         setEdges(data.edges.map(e => ({
           id: e.id,
           source: e.source,
@@ -312,16 +314,30 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
           target: e.target,
           targetHandle: e.target_port,
         })))
+        setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.3 }), 100)
       }
     } catch {
       // graph doesn't exist yet
     }
-  }, [graphName, setNodes, setEdges])
+  }, [graphName, setNodes, setEdges, layoutDirection])
 
   const onInit = useCallback((instance: ReactFlowInstance<Node, Edge>) => {
     reactFlowInstance.current = instance
     handleLoad()
   }, [handleLoad])
+
+  const toggleLayout = useCallback(() => {
+    setLayoutDirection(prev => {
+      const next = prev === 'LR' ? 'TB' : 'LR'
+      setNodes(nds => nds.map(n => ({
+        ...n,
+        position: { x: n.position.y, y: n.position.x },
+        data: { ...(n.data as Record<string, unknown>), layoutDirection: next },
+      })))
+      setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.2 }), 100)
+      return next
+    })
+  }, [setNodes])
 
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw' }}>
@@ -336,6 +352,8 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
           isRunning={isRunning}
           isSaving={isSaving}
           onBack={onBack}
+          layoutDirection={layoutDirection}
+          onToggleLayout={toggleLayout}
         />
 
         <div style={{ flex: 1, position: 'relative' }} ref={reactFlowWrapper}>
@@ -352,6 +370,7 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
             onPaneClick={onPaneClick}
             nodeTypes={nodeTypes}
             fitView
+            fitViewOptions={{ padding: 0.3 }}
             deleteKeyCode="Delete"
             colorMode={theme}
             defaultEdgeOptions={{
@@ -368,7 +387,12 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
         </div>
 
         {showLogs && (
-          <LogPanel logs={logs} onClose={() => setShowLogs(false)} />
+          <LogPanel
+            logs={logs}
+            isRunning={isRunning}
+            onClose={() => setShowLogs(false)}
+            onClear={() => setLogs([])}
+          />
         )}
       </div>
 
