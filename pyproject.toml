@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "qgraph"
-version = "0.1.0"
+version = "0.1.1"
 description = "A lightweight visual pipeline editor for workflow orchestration"
 readme = "README.md"
-license = "MIT"
+license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
     { name = "晓强" },
@@ -30,9 +30,6 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
     "click>=8.1.0",
     "pydantic>=2.0.0",
-    "aiosqlite>=0.20.0",
-    "tomli>=2.0.0; python_version < '3.11'",
-    "tomli-w>=1.0.0",
     "rich>=13.0.0",
 ]
 
