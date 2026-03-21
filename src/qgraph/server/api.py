@@ -43,15 +43,21 @@ async def save_graph(name: str, data: dict[str, Any]) -> dict[str, str]:
 
 @router.delete("/graphs/{name}")
 async def delete_graph(name: str) -> dict[str, str]:
-    if not storage.delete_graph(name):
-        raise HTTPException(status_code=404, detail=f"Graph '{name}' not found")
+    try:
+        if not storage.delete_graph(name):
+            raise HTTPException(status_code=404, detail=f"Graph '{name}' not found")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     return {"status": "ok"}
 
 
 @router.post("/graphs/{name}/delete")
 async def delete_graph_post(name: str) -> dict[str, str]:
-    if not storage.delete_graph(name):
-        raise HTTPException(status_code=404, detail=f"Graph '{name}' not found")
+    try:
+        if not storage.delete_graph(name):
+            raise HTTPException(status_code=404, detail=f"Graph '{name}' not found")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     return {"status": "ok"}
 
 

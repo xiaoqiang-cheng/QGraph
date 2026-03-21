@@ -79,10 +79,21 @@ class GraphStorage:
 
     def delete_graph(self, name: str) -> bool:
         path = self._graph_path(name)
-        if path.exists():
+        if not path.exists():
+            return False
+        try:
             path.unlink()
-            return True
-        return False
+        except OSError:
+            pass
+        if path.exists():
+            import os
+            try:
+                os.remove(str(path))
+            except OSError:
+                pass
+        if path.exists():
+            raise OSError(f"Failed to delete file: {path}")
+        return True
 
     def graph_exists(self, name: str) -> bool:
         return self._graph_path(name).exists()

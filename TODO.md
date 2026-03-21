@@ -6,19 +6,11 @@
 
 ## 🔴 已知 Bug（优先修复）
 
-- [ ] **Dashboard 删除图功能不生效**
-  - 症状：前端点击 Delete 确认后，文件未被删除，UI 列表不更新
-  - 已排查：后端 DELETE 端点本身正常工作（CLI `qgraph delete` 正常）
-  - 已排查：后端日志中从未收到 DELETE HTTP 请求，说明请求未到达后端
-  - 已尝试的修复方案（均未解决）：
-    1. 给 handleDelete 加 `await loadData()`
-    2. 移除 `e.stopPropagation()`
-    3. 去掉 `confirm()` 弹窗
-    4. 直接用 `fetch` 替代 `api.deleteGraph`
-  - **最新修复方案（待验证）**：改用 POST 方法替代 DELETE
-    - 后端新增 `POST /api/graphs/{name}/delete` 路由
-    - 前端 `api.deleteGraph` 改用 POST 到 `/graphs/{name}/delete`
-  - 建议：迁移到英文路径后在新终端环境中重新验证
+- [x] ~~**Dashboard 删除图功能不生效**~~ ✅ 已修复
+  - 根因：`path.unlink()` 在某些环境下静默失败（文件未真正删除但不抛异常）
+  - 修复：`storage.delete_graph()` 增加删除后验证 + `os.remove()` 备选 + 明确错误抛出
+  - API 层增加 `OSError` 捕获，返回 500 错误信息
+  - 前端使用 POST `/graphs/{name}/delete` 路由（避免 DELETE 方法被拦截）
 
 - [ ] **运行日志未持久化**
   - 症状：`run_manager._save_log()` 写入 `~/.qgraph/logs/` 时报 PermissionError
