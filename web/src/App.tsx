@@ -20,6 +20,7 @@ import Sidebar from './components/Sidebar'
 import Toolbar from './components/Toolbar'
 import ConfigPanel from './components/ConfigPanel'
 import LogPanel from './components/LogPanel'
+import QuickAdd from './components/QuickAdd'
 import Dashboard from './components/Dashboard'
 import { useTheme } from './hooks/useTheme'
 import { api } from './api'
@@ -102,6 +103,7 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
   const succeededNodes = useRef<Set<string>>(new Set())
   const clipboardNode = useRef<NodeData | null>(null)
   const nodeStartTimes = useRef<Map<string, number>>(new Map())
+  const [quickAddPos, setQuickAddPos] = useState<{ screen: { x: number; y: number }; flow: { x: number; y: number } } | null>(null)
 
   const nodeTypes = useMemo(() => ({ pipeline: PipelineNode }), [])
 
@@ -275,7 +277,66 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
 
   const onPaneClick = useCallback(() => {
     setSelectedNodeId(null)
+    setQuickAddPos(null)
   }, [])
+
+  const onPaneDoubleClick = useCallback((event: React.MouseEvent) => {
+    const target = event.target as HTMLElement
+    if (target.closest('.react-flow__node')) return
+    if (!reactFlowInstance.current || !reactFlowWrapper.current) return
+    const bounds = reactFlowWrapper.current.getBoundingClientRect()
+    const screenX = event.clientX - bounds.left
+    const screenY = event.clientY - bounds.top
+    const flowPos = reactFlowInstance.current.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY,
+    })
+    setQuickAddPos({
+      screen: { x: screenX, y: screenY },
+      flow: flowPos,
+    })
+  }, [])
+
+  const handleQuickAdd = useCallback((parsedNodes: { type: NodeType; name: string; config: NodeConfig }[]) => {
+    if (!quickAddPos || parsedNodes.length === 0) return
+    const startX = quickAddPos.flow.x
+    const startY = quickAddPos.flow.y
+    const spacing = 250
+
+    const newNodeIds: string[] = []
+
+    parsedNodes.forEach((parsed, i) => {
+      const id = nextNodeId()
+      const { inputs, outputs } = createDefaultPorts(parsed.type)
+      const nodeData: NodeData = {
+        id,
+        name: parsed.name,
+        node_type: parsed.type,
+        position: { x: startX + i * spacing, y: startY },
+        inputs,
+        outputs,
+        config: { ...createDefaultConfig(parsed.type), ...parsed.config },
+        status: 'idle',
+      }
+      nodeDataMap.current.set(id, nodeData)
+      setNodes(nds => [...nds, nodeDataToFlowNode(nodeData, layoutDirection)])
+      newNodeIds.push(id)
+    })
+
+    if (newNodeIds.length > 1) {
+      const newEdges = newNodeIds.slice(0, -1).map((srcId, i) => ({
+        id: `edge_${srcId}_${newNodeIds[i + 1]}`,
+        source: srcId,
+        sourceHandle: 'out_0',
+        target: newNodeIds[i + 1],
+        targetHandle: 'in_0',
+      }))
+      setEdges(eds => [...eds, ...newEdges])
+    }
+
+    setSelectedNodeId(newNodeIds[newNodeIds.length - 1])
+    setQuickAddPos(null)
+  }, [quickAddPos, setNodes, setEdges, layoutDirection])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -595,7 +656,7 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
           onToggleLayout={toggleLayout}
         />
 
-        <div style={{ flex: 1, position: 'relative' }} ref={reactFlowWrapper}>
+        <div style={{ flex: 1, position: 'relative' }} ref={reactFlowWrapper} onDoubleClick={onPaneDoubleClick}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -607,6 +668,7 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
             onDragOver={onDragOver}
             onNodeClick={onNodeClick}
             onPaneClick={onPaneClick}
+            zoomOnDoubleClick={false}
             nodeTypes={nodeTypes}
             fitView
             fitViewOptions={{ padding: 0.3 }}
@@ -623,6 +685,13 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
               maskColor="rgba(0, 0, 0, 0.3)"
             />
           </ReactFlow>
+          {quickAddPos && (
+            <QuickAdd
+              position={quickAddPos.screen}
+              onAdd={handleQuickAdd}
+              onClose={() => setQuickAddPos(null)}
+            />
+          )}
         </div>
 
         {showLogs && (

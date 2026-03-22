@@ -190,7 +190,7 @@ def test_storage_local_vs_global():
             check("local graph created", (local_dir / "local_test.json").exists())
 
             data = s.load_graph("local_test")
-            check("local graph has no project_dir", "project_dir" not in (data or {}))
+            check("local graph has project_dir", "project_dir" in (data or {}))
 
             s.delete_graph("local_test")
             check("local graph deleted", not (local_dir / "local_test.json").exists())

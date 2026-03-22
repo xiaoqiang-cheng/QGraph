@@ -155,9 +155,8 @@ class GraphStorage:
             "edges": [],
             "created_at": now,
             "updated_at": now,
+            "project_dir": os.getcwd(),
         }
-        if not self._local_dir:
-            data["project_dir"] = os.getcwd()
 
         path.write_text(
             json.dumps(data, indent=2, ensure_ascii=False),
@@ -169,7 +168,14 @@ class GraphStorage:
         path = self._graph_path(name)
         if not path.exists():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if "project_dir" not in data:
+            data["project_dir"] = os.getcwd()
+            path.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        return data
 
     def save_graph(self, name: str, data: dict[str, Any]) -> None:
         data["name"] = name
@@ -179,7 +185,7 @@ class GraphStorage:
         path = self._graph_path(name)
         if not path.exists():
             path = self.graphs_dir / f"{name}.json"
-        if not self._local_dir and "project_dir" not in data:
+        if "project_dir" not in data:
             data["project_dir"] = os.getcwd()
         path.write_text(
             json.dumps(data, indent=2, ensure_ascii=False),

@@ -48,13 +48,12 @@
 ## 🟢 后续迭代
 
 ### v0.2: 体验增强
-- [ ] **Quick Add — 粘贴命令智能创建节点**（已讨论，待细化设计）：
-  - 方案 A：Toolbar/画布输入框，粘贴命令自动解析为节点（纯前端字符串解析）
-    - `ENV=val python xxx.py --args` → Python Script 节点（提取 env_vars, script_path, args）
-    - `bash xxx.sh` 或其他 → Shell Command 节点
-    - `cd /path && cmd` → 提取 working_dir + command
-  - 方案 B：右键画布 "Paste as Node"，弹出预览确认后创建
-  - 方案 C：从 shell 脚本文件批量导入多个节点 + 自动连线
+- [x] ~~**Quick Add — 粘贴命令智能创建节点**~~ ✅ 已完成：
+  - 双击画布弹出输入框，自动解析命令为节点
+  - 支持 Python Script / Shell Command 智能识别
+  - 提取 env_vars（`KEY=val`）、working_dir（`cd /path &&`）
+  - 多行脚本自动生成多节点 + 串行连线
+  - 实时预览将创建的节点和连线
 - [ ] **单步调试**：逐节点执行，观察每步输出
 - [ ] **撤销 / 重做**（Ctrl+Z / Ctrl+Shift+Z）
 - [ ] 日志预览增强：全屏模式、关键字搜索
@@ -127,3 +126,8 @@
 - [x] 节点复制（Ctrl+C/V）、删除（Delete/Backspace）快捷键
 - [x] 节点耗时显示（执行完成后节点上显示 ⏱ 耗时）
 - [x] 日志按节点过滤（LogPanel 下拉筛选器）
+- [x] 统一 CLI/serve 执行层：共享 RunManager + running 文件 + 日志系统
+- [x] 本地/全局存储分离：`qgraph init` + `project_dir` 自动管理
+- [x] `qgraph ps` 基于 PID 文件检测运行中任务（不依赖 serve）
+- [x] Quick Add：双击画布粘贴命令创建节点 + 多行脚本自动连线
+- [x] Smoke test（30 项自动化检查）
