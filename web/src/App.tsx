@@ -100,8 +100,18 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
   const activeTestId = useRef<string | null>(null)
   const [lastRunFailed, setLastRunFailed] = useState(false)
   const succeededNodes = useRef<Set<string>>(new Set())
+  const clipboardNode = useRef<NodeData | null>(null)
+  const nodeStartTimes = useRef<Map<string, number>>(new Map())
 
   const nodeTypes = useMemo(() => ({ pipeline: PipelineNode }), [])
+
+  const nodeNames = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const [id, data] of nodeDataMap.current.entries()) {
+      map.set(id, data.name)
+    }
+    return map
+  }, [nodes])
 
   const selectedNodeData = selectedNodeId ? nodeDataMap.current.get(selectedNodeId) || null : null
 
@@ -136,15 +146,32 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
           const status = msg.status as NodeStatus
           const nodeId = msg.node_id
 
+          if (status === 'running') {
+            nodeStartTimes.current.set(nodeId, Date.now())
+          }
+
           if (status === 'success') {
             succeededNodes.current.add(nodeId)
+          }
+
+          let durationMs: number | undefined
+          if (status === 'success' || status === 'failed') {
+            const startTime = nodeStartTimes.current.get(nodeId)
+            if (startTime) {
+              durationMs = Date.now() - startTime
+              nodeStartTimes.current.delete(nodeId)
+            }
           }
 
           setNodes(nds => nds.map(n => {
             if (n.id !== nodeId) return n
             return {
               ...n,
-              data: { ...(n.data as Record<string, unknown>), status },
+              data: {
+                ...(n.data as Record<string, unknown>),
+                status,
+                ...(durationMs !== undefined ? { durationMs } : {}),
+              },
             }
           }))
 
@@ -249,6 +276,43 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
   const onPaneClick = useCallback(() => {
     setSelectedNodeId(null)
   }, [])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+      if (e.ctrlKey && e.key === 'c' && selectedNodeId) {
+        const data = nodeDataMap.current.get(selectedNodeId)
+        if (data) clipboardNode.current = { ...data }
+      }
+
+      if (e.ctrlKey && e.key === 'v' && clipboardNode.current) {
+        const src = clipboardNode.current
+        const id = `node_${Date.now()}`
+        const nodeData: NodeData = {
+          ...src,
+          id,
+          name: `${src.name} (copy)`,
+          position: { x: src.position.x + 40, y: src.position.y + 40 },
+          status: 'idle',
+        }
+        nodeDataMap.current.set(id, nodeData)
+        setNodes(nds => [...nds, nodeDataToFlowNode(nodeData, layoutDirection)])
+        setSelectedNodeId(id)
+        clipboardNode.current = nodeData
+      }
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
+        nodeDataMap.current.delete(selectedNodeId)
+        setNodes(nds => nds.filter(n => n.id !== selectedNodeId))
+        setEdges(eds => eds.filter(e2 => e2.source !== selectedNodeId && e2.target !== selectedNodeId))
+        setSelectedNodeId(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedNodeId, setNodes, setEdges, layoutDirection])
 
   const onNodeUpdate = useCallback((nodeId: string, updates: Partial<NodeData>) => {
     const existing = nodeDataMap.current.get(nodeId)
@@ -567,6 +631,7 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
             isRunning={isRunning}
             onClose={() => setShowLogs(false)}
             onClear={() => setLogs([])}
+            nodeNames={nodeNames}
           />
         )}
       </div>

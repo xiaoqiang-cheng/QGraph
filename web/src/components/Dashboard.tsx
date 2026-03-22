@@ -265,7 +265,12 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
   }, [loadHistory])
 
   const activeRuns = runs.filter(r => r.status === 'running')
-  const recentRuns = runs.filter(r => r.status !== 'running')
+
+  const sortedHistory = [...history].sort((a, b) => {
+    const ta = a.started_at ? new Date(a.started_at).getTime() : 0
+    const tb = b.started_at ? new Date(b.started_at).getTime() : 0
+    return tb - ta
+  })
 
   const btnStyle: React.CSSProperties = {
     padding: '6px 12px',
@@ -539,7 +544,7 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
               Execution History ({history.length})
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 12px' }}>
-              {history.length === 0 && recentRuns.length === 0 ? (
+              {sortedHistory.length === 0 ? (
                 <div style={{
                   padding: 32,
                   textAlign: 'center',
@@ -550,30 +555,7 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {recentRuns.map(run => (
-                    <div key={`mem-${run.run_id}`} style={{
-                      background: 'var(--bg-surface)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 6,
-                      padding: '8px 12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      cursor: 'pointer',
-                    }}
-                      onClick={() => setViewingLog(run.run_id)}
-                    >
-                      <span style={{
-                        fontSize: 12,
-                        color: run.status === 'completed' ? 'var(--success)' : 'var(--error)',
-                        flexShrink: 0,
-                      }}>{run.status === 'completed' ? '✓' : '✗'}</span>
-                      <span style={{ fontWeight: 500, fontSize: 12 }}>{run.graph_name}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{run.elapsed_seconds}s</span>
-                      <span style={{ fontSize: 10, color: 'var(--accent)', marginLeft: 'auto' }}>Logs →</span>
-                    </div>
-                  ))}
-                  {history.slice(0, 50).map(entry => {
+                  {sortedHistory.slice(0, 50).map(entry => {
                     const isDel = deletingRun === entry.run_id
                     return (
                       <div key={entry.run_id} style={{

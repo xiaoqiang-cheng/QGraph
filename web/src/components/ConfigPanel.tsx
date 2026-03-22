@@ -24,6 +24,8 @@ export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStart
   const [pythonPath, setPythonPath] = useState('')
   const [modulePath, setModulePath] = useState('')
   const [functionName, setFunctionName] = useState('')
+  const [parameters, setParameters] = useState<Array<{ key: string; value: string }>>([])
+  const [pendingSave, setPendingSave] = useState(false)
   const testLogEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -36,12 +38,18 @@ export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStart
       setPythonPath(node.config.python_path || '')
       setModulePath(node.config.module_path || '')
       setFunctionName(node.config.function_name || '')
+      const params = node.config.parameters || {}
+      setParameters(Object.entries(params).map(([key, value]) => ({ key, value: String(value) })))
     }
   }, [node])
 
   if (!node) return null
 
   const handleSave = () => {
+    const paramsObj: Record<string, string> = {}
+    for (const p of parameters) {
+      if (p.key.trim()) paramsObj[p.key.trim()] = p.value
+    }
     onUpdate(node.id, {
       name,
       config: {
@@ -53,12 +61,17 @@ export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStart
         python_path: pythonPath || undefined,
         module_path: modulePath || undefined,
         function_name: functionName || undefined,
+        parameters: Object.keys(paramsObj).length > 0 ? paramsObj : undefined,
       },
     })
   }
 
   const handleTest = () => {
     handleSave()
+    const paramsObj: Record<string, string> = {}
+    for (const p of parameters) {
+      if (p.key.trim()) paramsObj[p.key.trim()] = p.value
+    }
     const config: Record<string, unknown> = {
       ...node.config,
       command: command || undefined,
@@ -68,6 +81,7 @@ export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStart
       python_path: pythonPath || undefined,
       module_path: modulePath || undefined,
       function_name: functionName || undefined,
+      parameters: Object.keys(paramsObj).length > 0 ? paramsObj : undefined,
     }
     onStartTest(node.node_type, config)
   }
@@ -75,6 +89,13 @@ export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStart
   useEffect(() => {
     testLogEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [testLogs])
+
+  useEffect(() => {
+    if (pendingSave) {
+      setPendingSave(false)
+      handleSave()
+    }
+  })
 
   const color = NODE_TYPE_COLORS[node.node_type]
 
@@ -196,10 +217,71 @@ export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStart
           </>
         )
       case 'input':
+        return (
+          <>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+              Parameters are injected as environment variables into all downstream nodes. Use <code style={{ fontSize: 11 }}>os.getenv()</code> in Python or <code style={{ fontSize: 11 }}>%KEY%</code> (Win) / <code style={{ fontSize: 11 }}>$KEY</code> (Linux) in shell.
+            </div>
+            {parameters.map((p, i) => (
+              <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                <input
+                  value={p.key}
+                  onChange={e => {
+                    const next = [...parameters]
+                    next[i] = { ...next[i], key: e.target.value }
+                    setParameters(next)
+                  }}
+                  onBlur={handleSave}
+                  style={{ ...inputStyle, width: '40%', fontSize: 12 }}
+                  placeholder="KEY"
+                />
+                <input
+                  value={p.value}
+                  onChange={e => {
+                    const next = [...parameters]
+                    next[i] = { ...next[i], value: e.target.value }
+                    setParameters(next)
+                  }}
+                  onBlur={handleSave}
+                  style={{ ...inputStyle, flex: 1, fontSize: 12 }}
+                  placeholder="value"
+                />
+                <button
+                  onClick={() => {
+                    setParameters(parameters.filter((_, j) => j !== i))
+                    setPendingSave(true)
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    fontSize: 14,
+                    padding: '0 4px',
+                    flexShrink: 0,
+                  }}
+                >✕</button>
+              </div>
+            ))}
+            <button
+              onClick={() => setParameters([...parameters, { key: '', value: '' }])}
+              style={{
+                background: 'var(--bg-primary)',
+                border: '1px dashed var(--border)',
+                borderRadius: 6,
+                padding: '6px 0',
+                width: '100%',
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                fontSize: 12,
+              }}
+            >+ Add Parameter</button>
+          </>
+        )
       case 'output':
         return (
           <div style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-            {nodeType === 'input' ? 'Define input parameters for the pipeline.' : 'Collect output results from the pipeline.'}
+            Collect output results from the pipeline.
           </div>
         )
     }

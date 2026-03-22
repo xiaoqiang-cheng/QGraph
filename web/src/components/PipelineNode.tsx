@@ -11,6 +11,7 @@ interface PipelineNodeData {
   inputCount: number
   outputCount: number
   layoutDirection: 'LR' | 'TB'
+  durationMs?: number
 }
 
 const STATUS_INDICATORS: Record<NodeStatus, { icon: string; color: string; animate?: boolean }> = {
@@ -130,6 +131,17 @@ function PipelineNode({ id, data, selected }: NodeProps & { data: PipelineNodeDa
             {data.config.script_path}
           </div>
         )}
+        {data.durationMs != null && (data.status === 'success' || data.status === 'failed') && (
+          <div style={{
+            fontSize: 10,
+            color: 'var(--text-muted)',
+            marginTop: 4,
+          }}>
+            ⏱ {data.durationMs < 1000
+              ? `${Math.round(data.durationMs)}ms`
+              : `${(data.durationMs / 1000).toFixed(1)}s`}
+          </div>
+        )}
       </div>
 
       {data.inputCount > 0 && (
@@ -168,6 +180,7 @@ export default memo(PipelineNode, (prev, next) => {
   return (
     pd.label === nd.label &&
     pd.status === nd.status &&
+    pd.durationMs === nd.durationMs &&
     pd.layoutDirection === nd.layoutDirection &&
     pd.nodeType === nd.nodeType &&
     pd.inputCount === nd.inputCount &&

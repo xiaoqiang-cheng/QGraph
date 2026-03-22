@@ -2,19 +2,49 @@
 
 **轻量级可视化 Pipeline 编排工具**
 
-> 版本：v0.1.0 · 作者：晓强 · License: MIT
+> 版本：v0.1.1 · 作者：晓强 · License: MIT
 
-将散乱的脚本组织为可视化 DAG 工作流。通过 Web UI 拖拽编排，CLI 一键运行。`pip install` 即开箱即用。
+将散乱的脚本组织为可视化 DAG 工作流。通过 Web UI 拖拽编排，CLI 一键运行。`pip install` 即开箱即用，无需 Node.js。
 
-```
-[数据准备] → [模型训练] → [评估] → [导出 ONNX] → [完成]
-                       → [量化] ↗
-```
+<p align="center">
+  <img src="docs/screenshots/editor.png" alt="QGraph Editor" width="800" />
+</p>
+
+---
+
+## 特性
+
+- **可视化编排** — 拖拽节点、连线构建 DAG 工作流
+- **5 种节点类型** — Shell Command / Python Script / Python Function / Input / Output
+- **并行执行** — DAG 拓扑排序，无依赖的节点自动并行
+- **实时反馈** — WebSocket 日志推送 + 节点状态高亮动画
+- **Input 参数传递** — Input 节点的参数自动注入为所有下游节点的环境变量
+- **节点自测** — 单节点 Test 运行，实时日志输出，支持中断
+- **断点续传** — Pipeline 失败后可从失败节点处 Resume，跳过已成功节点
+- **轻量零依赖** — `pip install` 即用，前端打包在 Python 包内，无需 Node.js
+- **双模式** — Web UI + CLI，`qgraph run` 不需要启动 Web 服务
+
+---
+
+## 为什么选 QGraph？
+
+| | **QGraph** | Airflow | Prefect | n8n | Makefile |
+|---|:---:|:---:|:---:|:---:|:---:|
+| 安装方式 | `pip install` | DB + Scheduler + WebServer | pip + Cloud/Server | Docker / npm | 系统自带 |
+| 需要基础设施 | ❌ 无 | PostgreSQL + Redis | Server / Cloud | Docker | 无 |
+| 可视化编辑 | ✅ 拖拽画布 | Web UI（仅查看） | Web UI（仅查看） | ✅ 拖拽画布 | ❌ |
+| 代码侵入性 | ❌ 零侵入 | 需要学 DAG DSL | 需要装饰器 | 低 | Makefile 语法 |
+| 本地运行 | ✅ 直接跑 | 需部署 | 需 Agent | 需 Docker | ✅ |
+| 现有脚本复用 | ✅ 直接拖入 | 需包装为 Operator | 需包装为 Task | 需适配 | 需重写 |
+| 适合场景 | 个人/小团队脚本编排 | 企业级数据调度 | 团队级编排 | No-code 自动化 | 简单构建任务 |
+
+**QGraph 的定位**：在 Makefile（太简陋）和 Airflow（太重）之间，为**个人开发者和小团队**提供一个**轻量、可视化、零配置**的 Pipeline 工具。
 
 ---
 
 ## 目录
 
+- [为什么选 QGraph？](#为什么选-qgraph)
 - [安装](#安装)
 - [快速开始](#快速开始)
 - [Web UI 使用指南](#web-ui-使用指南)
@@ -23,6 +53,8 @@
   - [节点类型](#节点类型)
   - [节点配置](#节点配置)
   - [运行 Pipeline](#运行-pipeline)
+  - [节点自测](#节点自测)
+  - [断点续传](#断点续传)
 - [CLI 命令参考](#cli-命令参考)
 - [示例：ML 训练流水线](#示例ml-训练流水线)
 - [数据存储](#数据存储)
@@ -85,29 +117,37 @@ qgraph run my-pipeline
 
 访问 `http://localhost:9800`，Dashboard 是主控面板：
 
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="700" />
+</p>
+
 - **Pipeline 列表**：查看所有已保存的 Pipeline，显示节点数量和更新时间
 - **创建 Pipeline**：输入名称，点击 `+ Create` 或按 Enter
 - **运行 Pipeline**：点击 `▶ Run` 按钮直接运行
 - **删除 Pipeline**：点击 `Delete` 按钮（会弹出确认框）
 - **实时运行状态**：正在运行的 Pipeline 会实时显示当前节点和进度
-- **运行历史**：最近的运行记录及其状态（completed / error / stopped）
+- **运行历史**：按时间排序的运行记录及其状态（completed / failed / stopped）
 - **主题切换**：右上角 ☀️/🌙 按钮切换明暗主题
 
-点击 Pipeline 名称或 `View` 按钮进入编辑器。
+点击 Pipeline 名称或 `Edit` 按钮进入编辑器。
 
 ### 编辑器
 
-编辑器由四个区域组成：
+编辑器由四个可拖拽调整大小的区域组成：
+
+<p align="center">
+  <img src="docs/screenshots/editor-annotated.png" alt="Editor Layout" width="700" />
+</p>
 
 ```
 ┌──────────┬──────────────────────────────┬──────────┐
-│          │                              │          │
-│  Sidebar │        画布 (Canvas)          │  Config  │
+│          │         Toolbar              │          │
+│  Sidebar │──────────────────────────────│  Config  │
 │  (节点)   │                              │  Panel   │
-│          │   拖拽节点，连线编排           │  (配置)   │
-│          │                              │          │
+│          │   画布 (Canvas)               │  (配置)   │
+│  ←可拖拽→ │   拖拽节点，连线编排           │ ←可拖拽→  │
 │          ├──────────────────────────────┤          │
-│          │      Log Panel (日志)         │          │
+│          │    Log Panel (日志，可过滤)    │          │
 └──────────┴──────────────────────────────┴──────────┘
 ```
 
@@ -117,7 +157,8 @@ qgraph run my-pipeline
 |------|------|
 | 添加节点 | 从左侧 Sidebar 拖拽节点到画布 |
 | 移动节点 | 直接拖拽画布上的节点 |
-| 连线 | 从节点底部的输出端口拖线到另一个节点顶部的输入端口 |
+| 连线 | 从节点的输出端口拖线到另一个节点的输入端口 |
+| 复制节点 | 选中节点后 `Ctrl+C`，`Ctrl+V` 粘贴 |
 | 删除节点/连线 | 选中后按 `Delete` 或 `Backspace` |
 | 缩放 | 鼠标滚轮 |
 | 平移 | 按住鼠标右键拖动，或使用触控板 |
@@ -130,6 +171,7 @@ qgraph run my-pipeline
 | 💾 Save | 保存 Pipeline 到文件 |
 | ▶ Run | 运行当前 Pipeline |
 | ⏹ Stop | 停止正在运行的 Pipeline（运行中才显示） |
+| ↻ Resume | 从失败节点处重新执行（上次运行失败时才显示） |
 
 ### 节点类型
 
@@ -171,7 +213,14 @@ QGraph 提供 5 种节点类型：
 
 #### Input（绿色 🟢）
 
-Pipeline 的入口节点。定义初始参数，后续可注入到下游节点。
+Pipeline 的入口节点。定义全局参数，**自动注入为所有下游节点的环境变量**。
+
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| Parameters | 键值对，自动传递给下游 | `EPOCHS=10`, `LR=0.001` |
+
+- 下游节点通过 `os.getenv("EPOCHS")` (Python) 或 `%EPOCHS%` (Win) / `$EPOCHS` (Linux) 访问
+- 节点自身的 `env_vars` 优先级更高，可覆盖 Input 传递的同名参数
 
 #### Output（红色 🔴）
 
@@ -206,7 +255,29 @@ Pipeline 的出口节点。标记 Pipeline 的结束点。
 - 使用 DAG 拓扑排序（Kahn 算法）确定执行顺序
 - 没有依赖关系的节点自动并行执行
 - 汇合节点会等待所有上游节点完成后才开始
-- 如果任意节点失败，其下游节点仍会按正常流程调度（不会级联取消）
+- 如果任意节点失败，其**所有下游节点自动跳过**（skipped），不再执行
+
+### 节点自测
+
+在 ConfigPanel 中点击 **▶ Test Node** 按钮，可以单独运行选中的节点：
+
+<p align="center">
+  <img src="docs/screenshots/test-node.png" alt="Test Node" width="350" />
+</p>
+
+- 实时日志输出（通过 WebSocket 推送）
+- 自动注入同一图中 Input 节点的参数
+- 支持超时控制（默认 30s，上限 120s）
+- 运行中可点击 **⏹ Stop Test** 中断
+- 显示测试结果：✓ Passed / ✗ Failed / ⏱ Timeout / ⏹ Cancelled
+
+### 断点续传
+
+Pipeline 运行失败后，工具栏会出现 **↻ Resume** 按钮：
+
+- 点击 Resume 会跳过所有已成功的节点，只重新执行失败和被跳过的节点
+- 即使关闭浏览器重新打开，Resume 状态也会自动恢复（从运行日志中读取）
+- 修改失败节点的配置后再 Resume，非常适合调试场景
 
 ---
 
@@ -215,9 +286,9 @@ Pipeline 的出口节点。标记 Pipeline 的结束点。
 ### 服务管理
 
 ```bash
-qgraph serve                     # 启动 Web UI 服务（默认 http://localhost:9800）
+qgraph serve                     # 启动 Web UI 服务（默认 http://0.0.0.0:9800）
 qgraph serve --port 9801         # 指定端口
-qgraph serve --host 0.0.0.0     # 允许外部访问
+qgraph serve --host 127.0.0.1   # 限制本地访问
 ```
 
 ### Pipeline 管理
@@ -288,21 +359,17 @@ qgraph logs <run_id>
 ```
 Running graph: ml-training-pipeline
 
-  ✓ [node_input] → success
-  ✓ [node_prepare] → success
-    [stdout] === Step 2: Preparing Data ===
-    [stdout] Generating 200 samples...
-    [stdout] Done!
-  ✓ [node_train] → success
-    [stdout] === Step 3: Training Model ===
-    [stdout]   Epoch 1/5 - loss: 0.5043 - acc: 0.5905
-    [stdout]   Epoch 5/5 - loss: 0.1219 - acc: 0.9842
-  ⟳ [node_evaluate] → running     # 并行执行
-  ⟳ [node_quantize] → running     # 并行执行
-  ✓ [node_evaluate] → success
-  ✓ [node_quantize] → success
-  ✓ [node_export] → success
-  ✓ [node_output] → success
+  ✓ Config → success
+  ✓ Prepare Data → success
+    Inherited 4 params from Input: OUTPUT_DIR, LEARNING_RATE, EPOCHS, NUM_SAMPLES
+    Running: python ./demo/02_prepare_data.py
+  ✓ Train Model → success        ⏱ 1.2s
+  ⟳ Evaluate → running           # 并行执行
+  ⟳ Quantize → running           # 并行执行
+  ✓ Evaluate → success           ⏱ 0.5s
+  ✓ Quantize → success           ⏱ 0.3s
+  ✓ Export ONNX → success
+  ✓ Output → success
 
 Pipeline completed successfully: 7 nodes
 ```
@@ -421,6 +488,15 @@ cd web && npx tsc --noEmit
 ```bash
 cd web && npm run build
 # 输出到 src/qgraph/web/dist/，通过 qgraph serve 直接 serve
+```
+
+### 发布
+
+```bash
+python release.py                    # 构建 wheel
+python release.py --publish          # 自动 bump patch + 构建 + 上传 PyPI
+python release.py --bump minor       # bump minor 版本 + 构建
+python release.py --bump 1.0.0       # 设置精确版本号 + 构建
 ```
 
 ### 项目结构

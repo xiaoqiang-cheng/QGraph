@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "qgraph"
-version = "0.1.1"
+version = "0.1.2"
 description = "A lightweight visual pipeline editor for workflow orchestration"
 readme = "README.md"
 license = {text = "MIT"}
@@ -37,8 +37,8 @@ dependencies = [
 qgraph = "qgraph.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/xiaoqiang/qgraph"
-Repository = "https://github.com/xiaoqiang/qgraph"
+Homepage = "https://github.com/xiaoqiang-cheng/QGraph"
+Repository = "https://github.com/xiaoqiang-cheng/QGraph"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/qgraph"]

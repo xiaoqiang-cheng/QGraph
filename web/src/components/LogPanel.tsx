@@ -11,13 +11,15 @@ interface LogPanelProps {
   isRunning: boolean
   onClose: () => void
   onClear: () => void
+  nodeNames?: Map<string, string>
 }
 
-export default function LogPanel({ logs, isRunning, onClose, onClear }: LogPanelProps) {
+export default function LogPanel({ logs, isRunning, onClose, onClear, nodeNames }: LogPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(240)
   const [autoScroll, setAutoScroll] = useState(true)
+  const [filterNodeId, setFilterNodeId] = useState<string>('')
   const dragRef = useRef<{ startY: number; startH: number } | null>(null)
 
   useEffect(() => {
@@ -105,6 +107,27 @@ export default function LogPanel({ logs, isRunning, onClose, onClear }: LogPanel
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           {logs.length} lines
         </span>
+        {nodeNames && nodeNames.size > 0 && (
+          <select
+            value={filterNodeId}
+            onChange={e => setFilterNodeId(e.target.value)}
+            style={{
+              background: 'var(--bg-primary)',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              color: 'var(--text-primary)',
+              fontSize: 11,
+              padding: '2px 6px',
+              outline: 'none',
+              maxWidth: 140,
+            }}
+          >
+            <option value="">All Nodes</option>
+            {Array.from(nodeNames.entries()).map(([id, name]) => (
+              <option key={id} value={id}>{name}</option>
+            ))}
+          </select>
+        )}
         <div style={{ flex: 1 }} />
         {!autoScroll && (
           <button
@@ -138,7 +161,9 @@ export default function LogPanel({ logs, isRunning, onClose, onClear }: LogPanel
             {isRunning ? 'Waiting for logs...' : 'No logs. Click ▶ Run to start.'}
           </div>
         )}
-        {logs.map((entry, i) => {
+        {logs
+          .filter(entry => !filterNodeId || entry.node_id === filterNodeId)
+          .map((entry, i) => {
           const msg = entry.message
           const isError = msg.includes('Failed') || msg.includes('ERROR') || msg.includes('[stderr]')
           const isSuccess = msg.includes('Completed') || msg.includes('successfully')

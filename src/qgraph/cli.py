@@ -139,7 +139,10 @@ def run(name: str, detach: bool):
 
 
 @main.command()
-@click.option("-a", "--all", "show_all", is_flag=True, help="Show all executions including finished")
+@click.option(
+    "-a", "--all", "show_all", is_flag=True,
+    help="Show all executions including finished",
+)
 def ps(show_all: bool):
     """List running graph executions (requires server running)."""
     import json
@@ -242,8 +245,8 @@ def logs(run_id: str):
         console.print(f"[red]Logs for run '{run_id}' not found.[/red]")
         console.print()
         console.print("Available runs:")
-        from qgraph.engine.run_manager import RunManager as RM
-        for entry in RM.list_saved_logs()[:10]:
+        from qgraph.engine.run_manager import RunManager
+        for entry in RunManager.list_saved_logs()[:10]:
             status_color = "green" if entry["status"] == "completed" else "red"
             console.print(
                 f"  [{status_color}]{entry['status']:10}[/{status_color}] "

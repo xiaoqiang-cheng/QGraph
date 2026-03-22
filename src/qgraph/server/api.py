@@ -127,6 +127,20 @@ async def test_node(payload: dict[str, Any]) -> dict[str, Any]:
     if not node_type:
         raise HTTPException(status_code=400, detail="node_type is required")
 
+    input_params: dict[str, str] = {}
+    if graph_name != "__test__":
+        real_graph = storage.load_graph(graph_name)
+        if real_graph:
+            for n in real_graph.get("nodes", []):
+                if n.get("node_type") == "input":
+                    params = n.get("config", {}).get("parameters", {})
+                    for k, v in params.items():
+                        if k not in input_params:
+                            input_params[k] = str(v)
+
+    test_env_vars = {**input_params, **(config.get("env_vars") or {})}
+    test_config = {**config, "env_vars": test_env_vars if test_env_vars else {}}
+
     test_node_data = {
         "id": "__test__",
         "name": "Test Node",
@@ -134,7 +148,7 @@ async def test_node(payload: dict[str, Any]) -> dict[str, Any]:
         "position": {"x": 0, "y": 0},
         "inputs": [],
         "outputs": [],
-        "config": config,
+        "config": test_config,
         "status": "idle",
     }
 

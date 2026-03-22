@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import defaultdict
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from qgraph.core.models import ExecutionResult, Graph, NodeStatus
 
@@ -48,6 +49,24 @@ class PipelineExecutor:
         failed_nodes: set[str] = set()
         _skip = skip_nodes or set()
 
+        inherited_env: dict[str, dict[str, str]] = {}
+        for node in graph.nodes:
+            if node.node_type.value == "input" and node.config.parameters:
+                params = {k: str(v) for k, v in node.config.parameters.items()}
+                visited: set[str] = set()
+                bfs = list(adj[node.id])
+                while bfs:
+                    nid = bfs.pop(0)
+                    if nid in visited:
+                        continue
+                    visited.add(nid)
+                    if nid not in inherited_env:
+                        inherited_env[nid] = {}
+                    for k, v in params.items():
+                        if k not in inherited_env[nid]:
+                            inherited_env[nid][k] = v
+                    bfs.extend(adj[nid])
+
         if _skip:
             pending = list(_skip)
             while pending:
@@ -79,7 +98,10 @@ class PipelineExecutor:
             tasks = []
             for node_id in queue:
                 node = node_map[node_id]
-                tasks.append(self._execute_node(graph_name, node_id, node, graph_data))
+                tasks.append(self._execute_node(
+                    graph_name, node_id, node, graph_data,
+                    inherited_env.get(node_id, {}),
+                ))
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             next_queue: list[str] = []
@@ -153,6 +175,7 @@ class PipelineExecutor:
         node_id: str,
         node: Any,
         graph_data: dict[str, Any],
+        extra_env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         start = time.monotonic()
         logs: list[str] = []
@@ -164,12 +187,17 @@ class PipelineExecutor:
             await self._emit_log(graph_name, node_id, msg)
 
         try:
+            if extra_env:
+                await log(
+                    f"[{node.name}] Inherited {len(extra_env)} "
+                    f"params from Input: {', '.join(extra_env)}"
+                )
             await log(f"[{node.name}] Starting execution...")
 
             if node.node_type.value == "shell_command":
-                result = await self._run_shell(node, log)
+                result = await self._run_shell(node, log, extra_env)
             elif node.node_type.value == "python_script":
-                result = await self._run_python_script(node, log)
+                result = await self._run_python_script(node, log, extra_env)
             elif node.node_type.value == "python_function":
                 result = await self._run_python_function(node, log)
             elif node.node_type.value == "input":
@@ -204,7 +232,9 @@ class PipelineExecutor:
                 duration_ms=duration,
             )
 
-    async def _run_shell(self, node: Any, log: Callable) -> dict[str, Any]:
+    async def _run_shell(
+        self, node: Any, log: Callable, extra_env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         command = node.config.command
         if not command:
             raise ValueError("Shell command node has no command configured")
@@ -212,10 +242,8 @@ class PipelineExecutor:
         await log(f"[{node.name}] Running: {command}")
         cwd = node.config.working_dir
 
-        env = None
-        if node.config.env_vars:
-            import os
-            env = {**os.environ, **node.config.env_vars}
+        import os
+        env = {**os.environ, **(extra_env or {}), **(node.config.env_vars or {})}
 
         process = await asyncio.create_subprocess_shell(
             command,
@@ -243,7 +271,9 @@ class PipelineExecutor:
 
         return {"returncode": process.returncode}
 
-    async def _run_python_script(self, node: Any, log: Callable) -> dict[str, Any]:
+    async def _run_python_script(
+        self, node: Any, log: Callable, extra_env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         script_path = node.config.script_path
         if not script_path:
             raise ValueError("Python script node has no script_path configured")
@@ -254,10 +284,8 @@ class PipelineExecutor:
 
         await log(f"[{node.name}] Running: {' '.join(cmd)}")
 
-        env = None
-        if node.config.env_vars:
-            import os
-            env = {**os.environ, **node.config.env_vars}
+        import os
+        env = {**os.environ, **(extra_env or {}), **(node.config.env_vars or {})}
 
         process = await asyncio.create_subprocess_exec(
             *cmd,

@@ -69,15 +69,22 @@ class RunManager:
                 "run_id": run_info.run_id,
                 "graph_name": run_info.graph_name,
                 "status": run_info.status,
-                "started_at": datetime.fromtimestamp(run_info.started_at, tz=timezone.utc).isoformat(),
-                "finished_at": datetime.fromtimestamp(run_info.finished_at, tz=timezone.utc).isoformat()
+                "started_at": datetime.fromtimestamp(
+                    run_info.started_at, tz=timezone.utc,
+                ).isoformat(),
+                "finished_at": datetime.fromtimestamp(
+                    run_info.finished_at, tz=timezone.utc,
+                ).isoformat()
                 if run_info.finished_at
                 else None,
                 "node_statuses": dict(run_info.node_statuses),
                 "logs": run_info.logs,
             }
             log_path = logs_dir / f"{run_info.run_id}.json"
-            log_path.write_text(json.dumps(log_data, indent=2, ensure_ascii=False), encoding="utf-8")
+            log_path.write_text(
+                json.dumps(log_data, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
             print(f"[QGraph] Saved log: {log_path}", flush=True)
         except Exception as e:
             print(f"[QGraph] Failed to save log for {run_info.run_id}: {e}", flush=True)

@@ -32,36 +32,22 @@
   - Clear 清空按钮
   - 长文本自动换行（`pre-wrap` + `break-all`）
 - [x] ~~**`qgraph serve` 默认绑定 `0.0.0.0`**~~ ✅ 已完成
-  - 方便远程服务器场景访问，用户可通过 `--host 127.0.0.1` 限制本地访问
 - [x] ~~**节点自测（Test Node）**~~ ✅ 已完成
-  - ConfigPanel 底部 "▶ Test Node" 按钮（Shell/Python Script/Python Function 节点可用）
-  - 后端 `POST /api/nodes/test` 接口，构造单节点图执行，支持超时（默认 30s，上限 120s）
-  - 测试结果内嵌 ConfigPanel：状态（✓ Passed / ✗ Failed / ⏱ Timeout）+ 耗时 + 日志输出
-- [ ] **连线数据传递**：当前连线只表示执行依赖，不传递实际数据。需实现：
-  - 上游节点 env_vars / stdout 输出 → 自动注入为下游节点的环境变量
-  - 模板替换语法 `{{node_name.output.key}}`
-- [ ] **Input 节点参数传递**：Input 节点定义的参数应自动注入到所有下游节点的 env_vars
-- [ ] **Graph 存储位置调整**（已讨论确认的设计）：
-  - 默认保存到项目目录 `.qgraph/graphs/`（类似 `.git/`），方便 git 管理
-  - 如果当前目录没有 `.qgraph/`，使用 `~/.qgraph/graphs/` 全局存储
-  - 新增 `qgraph init` 命令在当前目录初始化 `.qgraph/`
-  - 日志/运行历史保持在 `~/.qgraph/logs/`
+- [x] ~~**Input 节点参数传递**~~ ✅ 已完成
 - [x] ~~**前端 Build → pip 打包**~~ ✅ 已完成
-  - `npm run build` 输出到 `src/qgraph/web/dist/`
-  - `pyproject.toml` 添加 `force-include` 将 dist/ 打入 wheel
-  - `qgraph serve` 单端口同时 serve API + 静态文件
-  - WebSocket URL 改为 `window.location.host` 动态适配端口
+
+### v0.1.0 发布前（按优先级排序）
+
+- [x] ~~**节点复制 / 粘贴**~~（S 级）✅ Ctrl+C 复制选中节点，Ctrl+V 粘贴（偏移 +40px），Delete 删除节点及相关连线
+- [x] ~~**节点耗时显示**~~（A 级）✅ 执行完成后节点上显示 ⏱ 耗时（前端计时，无后端改动）
+- [x] ~~**日志按节点过滤**~~（A 级）✅ LogPanel 节点下拉筛选器，可按节点过滤日志
+- [x] ~~**前端构建 + 发布 PyPI**~~ ✅ release.py 已优化（预检 lint/tsc + 前端构建验证 + wheel 大小检查）
 
 ---
 
 ## 🟢 后续迭代
 
-### Phase 2+: 流程控制
-- [ ] 条件分支节点（if/else）
-- [ ] 循环节点（for/while）
-- [ ] 单步调试：逐节点执行，观察每步输出
-
-### Phase 2+: 增强功能
+### v0.2: 体验增强
 - [ ] **Quick Add — 粘贴命令智能创建节点**（已讨论，待细化设计）：
   - 方案 A：Toolbar/画布输入框，粘贴命令自动解析为节点（纯前端字符串解析）
     - `ENV=val python xxx.py --args` → Python Script 节点（提取 env_vars, script_path, args）
@@ -69,16 +55,29 @@
     - `cd /path && cmd` → 提取 working_dir + command
   - 方案 B：右键画布 "Paste as Node"，弹出预览确认后创建
   - 方案 C：从 shell 脚本文件批量导入多个节点 + 自动连线
-- [ ] 日志预览增强：全屏模式、关键字搜索、按节点过滤日志
-- [ ] 详细进度监控（进度条、耗时统计）
+- [ ] **单步调试**：逐节点执行，观察每步输出
+- [ ] **撤销 / 重做**（Ctrl+Z / Ctrl+Shift+Z）
+- [ ] 日志预览增强：全屏模式、关键字搜索
+
+### v0.2: 数据流
+- [ ] **连线数据传递**（简化版）：上游节点 stdout 最后一行自动注入为下游 `QGRAPH_<NODE_NAME>` 环境变量
+- [ ] **连线数据传递**（完整版）：模板语法 `{{node_name.output.key}}`
 - [ ] 结构化 JSON 数据流（节点间传递 JSON 对象）
-- [ ] 节点复制 / 粘贴
-- [ ] 撤销 / 重做（Ctrl+Z / Ctrl+Shift+Z）
-- [ ] 节点分组 / 子图
+
+### v0.2: 项目管理
+- [ ] **Graph 存储位置调整**：
+  - 默认保存到项目目录 `.qgraph/graphs/`（类似 `.git/`），方便 git 管理
+  - 如果当前目录没有 `.qgraph/`，使用 `~/.qgraph/graphs/` 全局存储
+  - 新增 `qgraph init` 命令在当前目录初始化 `.qgraph/`
+
+### v0.3+: 高级功能
+- [ ] 条件分支节点（if/else）— 需谨慎评估，和"轻量"定位可能冲突
+- [ ] 循环节点（for/while）— 同上
 - [ ] 断点调试：在某个节点暂停执行
+- [ ] 节点分组 / 子图
 - [ ] 运行历史对比：对比两次运行的参数和结果
 
-### Phase 3+: 生态
+### v1.0+: 生态
 - [ ] 自定义节点注册（插件机制）
 - [ ] 多用户 / 团队协作（用户管理、权限控制）
 - [ ] 远程执行（SSH 到远程机器执行节点）
@@ -119,3 +118,11 @@
 - [x] 断点续传（Resume）：Pipeline 失败后 Toolbar 出现 "↻ Resume" 按钮，跳过已成功节点从失败处重新执行
 - [x] 面板边界可拖拽调整宽度（Sidebar / ConfigPanel / LogPanel）
 - [x] Test Node 日志实时推送：通过 WebSocket `test_log` 消息实时显示，不再等请求完成
+- [x] Input 节点参数自动传递：BFS 传播到所有下游节点 env_vars，支持覆盖
+- [x] 编辑器加载时自动恢复上次失败运行的 Resume 状态
+- [x] Input 节点 ConfigPanel 可编辑 parameters（键值对编辑器）
+- [x] 自测节点自动注入 Input 参数 + 提示跨平台环境变量引用语法
+- [x] 执行历史按时间排序（Dashboard）
+- [x] 节点复制（Ctrl+C/V）、删除（Delete/Backspace）快捷键
+- [x] 节点耗时显示（执行完成后节点上显示 ⏱ 耗时）
+- [x] 日志按节点过滤（LogPanel 下拉筛选器）
