@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "qgraph"
-version = "0.1.5"
+version = "0.1.7"
 description = "A lightweight visual pipeline editor for workflow orchestration"
 readme = "README.md"
 license = {text = "MIT"}
@@ -45,7 +45,6 @@ packages = ["src/qgraph"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/qgraph/web/dist" = "qgraph/web/dist"
-"src/qgraph/templates" = "qgraph/templates"
 
 [tool.ruff]
 line-length = 100
