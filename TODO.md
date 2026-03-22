@@ -65,10 +65,11 @@
 - [ ] 结构化 JSON 数据流（节点间传递 JSON 对象）
 
 ### v0.2: 项目管理
-- [ ] **Graph 存储位置调整**：
-  - 默认保存到项目目录 `.qgraph/graphs/`（类似 `.git/`），方便 git 管理
-  - 如果当前目录没有 `.qgraph/`，使用 `~/.qgraph/graphs/` 全局存储
-  - 新增 `qgraph init` 命令在当前目录初始化 `.qgraph/`
+- [x] ~~**Graph 存储位置调整**~~ ✅ 已完成：
+  - `qgraph init` 在当前目录创建 `.qgraph/graphs/`
+  - 有 `.qgraph/` 则存本地，否则存 `~/.qgraph/graphs/`（全局）
+  - 全局图自动记录 `project_dir`，执行时默认 cd 到该目录
+  - `list_graphs()` 合并本地 + 全局图（本地优先）
 
 ### v0.3+: 高级功能
 - [ ] 条件分支节点（if/else）— 需谨慎评估，和"轻量"定位可能冲突

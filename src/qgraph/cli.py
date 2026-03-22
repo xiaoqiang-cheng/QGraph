@@ -24,6 +24,16 @@ def serve(port: int, host: str):
     uvicorn.run(app, host=host, port=port)
 
 
+@main.command()
+def init():
+    """Initialize .qgraph/ in the current directory for local graph storage."""
+    from qgraph.core.storage import GraphStorage
+
+    local_dir = GraphStorage.init_local()
+    click.echo(f"Initialized QGraph project: {local_dir}")
+    click.echo("Graphs will be stored in .qgraph/graphs/ (local to this project)")
+
+
 @main.command("list")
 def list_graphs():
     """List all saved graphs."""
@@ -40,12 +50,15 @@ def list_graphs():
     console = Console()
     table = Table(title="QGraph Pipelines")
     table.add_column("Name", style="cyan")
-    table.add_column("Created", style="green")
-    table.add_column("Updated", style="yellow")
+    table.add_column("Source", style="magenta")
     table.add_column("Nodes", justify="right")
+    table.add_column("Updated", style="yellow")
 
     for g in graphs:
-        table.add_row(g["name"], g["created_at"], g["updated_at"], str(g["node_count"]))
+        source = "local" if g.get("local") else "global"
+        table.add_row(
+            g["name"], source, str(g["node_count"]), g["updated_at"][:19],
+        )
 
     console.print(table)
 
@@ -76,12 +89,14 @@ def run(name: str, detach: bool):
     """Execute a graph pipeline."""
     import asyncio
     import sys
+    import time
 
     from rich.console import Console
 
     from qgraph.core.models import NodeStatus
     from qgraph.core.storage import GraphStorage
     from qgraph.engine.executor import PipelineExecutor
+    from qgraph.engine.run_manager import RunManager
 
     console = Console()
     storage = GraphStorage()
@@ -90,16 +105,24 @@ def run(name: str, detach: bool):
         console.print(f"[red]Graph '{name}' not found.[/red]")
         raise SystemExit(1)
 
+    is_local = storage.is_graph_local(name)
+    started_at = time.time()
+    run_id = f"run_{name}_{int(started_at)}"
+
     console.print(f"[bold cyan]Running graph:[/bold cyan] {name}")
     console.print()
 
     all_logs: list[str] = []
+    node_statuses: dict[str, str] = {}
+
+    RunManager.write_running_file(run_id, name, is_local, source="cli")
 
     async def on_log(_gn: str, node_id: str, message: str):
         console.print(f"  {message}")
         all_logs.append(message)
 
     async def on_status(_gn: str, node_id: str, status: str):
+        node_statuses[node_id] = status
         style = {
             "running": "bold yellow",
             "success": "bold green",
@@ -108,21 +131,30 @@ def run(name: str, detach: bool):
             "skipped": "dim yellow",
         }.get(status, "")
         icon = {
-            "running": "⟳",
-            "success": "✓",
-            "failed": "✗",
-            "queued": "◦",
-            "skipped": "⊘",
-        }.get(status, "○")
-        console.print(f"  [{style}]{icon} [{node_id}] → {status}[/{style}]")
+            "running": "~",
+            "success": "v",
+            "failed": "x",
+            "queued": ".",
+            "skipped": "-",
+        }.get(status, "o")
+        console.print(f"  [{style}]{icon} [{node_id}] -> {status}[/{style}]")
 
-    executor = PipelineExecutor(on_log=on_log, on_status=on_status)
-    results = asyncio.run(executor.execute(graph_data))
+    try:
+        executor = PipelineExecutor(on_log=on_log, on_status=on_status)
+        results = asyncio.run(executor.execute(graph_data))
+    finally:
+        RunManager.remove_running_file(run_id, is_local)
 
     console.print()
     failed = sum(1 for r in results.values() if r.status == NodeStatus.FAILED)
     skipped = sum(1 for r in results.values() if r.status == NodeStatus.SKIPPED)
     succeeded = sum(1 for r in results.values() if r.status == NodeStatus.SUCCESS)
+
+    run_status = "failed" if failed > 0 else "completed"
+    _save_cli_run_log(
+        run_id, name, run_status, started_at,
+        node_statuses, all_logs, is_local,
+    )
 
     if failed > 0:
         parts = [f"{succeeded} succeeded", f"{failed} failed"]
@@ -138,82 +170,116 @@ def run(name: str, detach: bool):
         )
 
 
+def _save_cli_run_log(
+    run_id: str,
+    graph_name: str,
+    status: str,
+    started_at: float,
+    node_statuses: dict[str, str],
+    logs: list[str],
+    is_local: bool = False,
+):
+    import json
+    import time
+
+    from qgraph.core.storage import get_logs_dir
+
+    finished_at = time.time()
+
+    from datetime import datetime, timezone
+
+    log_data = {
+        "run_id": run_id,
+        "graph_name": graph_name,
+        "status": status,
+        "started_at": datetime.fromtimestamp(
+            started_at, tz=timezone.utc,
+        ).isoformat(),
+        "finished_at": datetime.fromtimestamp(
+            finished_at, tz=timezone.utc,
+        ).isoformat(),
+        "node_statuses": node_statuses,
+        "logs": logs,
+    }
+    try:
+        log_path = get_logs_dir(is_local) / f"{run_id}.json"
+        log_path.write_text(
+            json.dumps(log_data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 @main.command()
 @click.option(
     "-a", "--all", "show_all", is_flag=True,
     help="Show all executions including finished",
 )
 def ps(show_all: bool):
-    """List running graph executions (requires server running)."""
-    import json
-    import urllib.request
+    """List running executions, or all history with -a."""
+    from qgraph.engine.run_manager import RunManager
 
-    url = "http://127.0.0.1:9800/api/runs"
-    if show_all:
-        url += "?all=true"
+    running = RunManager.list_running()
 
-    try:
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            runs = json.loads(resp.read().decode())
-    except Exception:
-        if show_all:
-            from qgraph.engine.run_manager import RunManager
-            saved = RunManager.list_saved_logs()
-            if not saved:
-                click.echo("No executions found.")
-                return
-            from rich.console import Console
-            from rich.table import Table
-
-            console = Console()
-            table = Table(title="Saved Executions (server not running)")
-            table.add_column("Run ID", style="cyan")
-            table.add_column("Graph", style="green")
-            table.add_column("Status", style="yellow")
-            table.add_column("Logs", justify="right")
-            for e in saved[:20]:
-                sc = "green" if e["status"] == "completed" else "red"
-                st = f"[{sc}]{e['status']}[/{sc}]"
-                table.add_row(
-                    e["run_id"], e["graph_name"], st, str(e["log_count"])
-                )
-            console.print(table)
+    if not show_all:
+        if not running:
+            click.echo("No running executions.")
+            click.echo("Use 'qgraph ps -a' to view execution history.")
             return
-        click.echo("Could not connect to QGraph server. Is it running? (qgraph serve)")
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="Running Executions")
+        table.add_column("Run ID", style="cyan")
+        table.add_column("Graph", style="green")
+        table.add_column("Status", style="yellow")
+        table.add_column("PID", justify="right")
+        table.add_column("Elapsed", justify="right")
+        table.add_column("Source", style="magenta")
+        for r in running:
+            table.add_row(
+                r["run_id"], r["graph_name"],
+                "[bold yellow]running[/bold yellow]",
+                str(r["pid"]),
+                f"{r['elapsed_seconds']}s", r["source"],
+            )
+        console.print(table)
         return
 
-    if not runs:
-        click.echo("No running executions." if not show_all else "No executions found.")
-        return
+    saved = RunManager.list_saved_logs()
 
     from rich.console import Console
     from rich.table import Table
 
     console = Console()
-    title = "All Executions" if show_all else "Running Executions"
-    table = Table(title=title)
+    table = Table(title="All Executions")
     table.add_column("Run ID", style="cyan")
     table.add_column("Graph", style="green")
     table.add_column("Status", style="yellow")
-    table.add_column("Elapsed", justify="right")
-    table.add_column("Current Node", style="magenta")
+    table.add_column("Started", style="dim")
+    table.add_column("Logs", justify="right")
 
-    for r in runs:
-        elapsed = f"{r['elapsed_seconds']}s"
-        status_style = {
-            "running": "[bold yellow]",
-            "completed": "[green]",
-            "stopped": "[red]",
-        }.get(r["status"], "")
-        status_end = "[/]" if status_style else ""
+    for r in running:
         table.add_row(
-            r["run_id"],
-            r["graph_name"],
-            f"{status_style}{r['status']}{status_end}",
-            elapsed,
-            r.get("current_node") or "-",
+            r["run_id"], r["graph_name"],
+            "[bold yellow]running[/bold yellow]",
+            (r.get("started_at") or "")[:19], "-",
         )
+
+    for e in saved[:50]:
+        sc = "green" if e["status"] == "completed" else "red"
+        st = f"[{sc}]{e['status']}[/{sc}]"
+        started = (e.get("started_at") or "")[:19]
+        table.add_row(
+            e["run_id"], e["graph_name"], st, started,
+            str(e["log_count"]),
+        )
+
+    if not running and not saved:
+        click.echo("No executions found.")
+        return
 
     console.print(table)
 

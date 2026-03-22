@@ -17,6 +17,7 @@ class PipelineExecutor:
     ):
         self._results: dict[str, ExecutionResult] = {}
         self._cancelled = False
+        self._project_dir: str | None = None
         self._on_log = on_log
         self._on_status = on_status
 
@@ -35,6 +36,7 @@ class PipelineExecutor:
     ) -> dict[str, ExecutionResult]:
         graph = Graph(**graph_data)
         graph_name = graph.name
+        self._project_dir = graph_data.get("project_dir")
         adj: dict[str, list[str]] = defaultdict(list)
         parents: dict[str, list[str]] = defaultdict(list)
         in_degree: dict[str, int] = {node.id: 0 for node in graph.nodes}
@@ -240,7 +242,7 @@ class PipelineExecutor:
             raise ValueError("Shell command node has no command configured")
 
         await log(f"[{node.name}] Running: {command}")
-        cwd = node.config.working_dir
+        cwd = node.config.working_dir or self._project_dir
 
         import os
         env = {**os.environ, **(extra_env or {}), **(node.config.env_vars or {})}
@@ -291,7 +293,7 @@ class PipelineExecutor:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=node.config.working_dir,
+            cwd=node.config.working_dir or self._project_dir,
             env=env,
         )
 

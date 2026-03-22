@@ -3,21 +3,44 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from qgraph.core.storage import get_logs_dir
+from qgraph.core.storage import (
+    get_all_logs_dirs,
+    get_all_running_dirs,
+    get_logs_dir,
+    get_running_dir,
+)
 from qgraph.engine.executor import PipelineExecutor
 
 logger = logging.getLogger("qgraph.run_manager")
+
+
+def _is_pid_alive(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x100000, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError, SystemError):
+        return False
 
 
 @dataclass
 class RunInfo:
     run_id: str
     graph_name: str
+    is_local: bool = False
     status: str = "running"
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
@@ -62,9 +85,71 @@ class RunManager:
     def get_runs_for_graph(self, graph_name: str) -> list[RunInfo]:
         return [r for r in self._runs.values() if r.graph_name == graph_name]
 
+    @staticmethod
+    def write_running_file(
+        run_id: str, graph_name: str, is_local: bool = False,
+        source: str = "cli",
+    ):
+        running_dir = get_running_dir(is_local)
+        data = {
+            "run_id": run_id,
+            "graph_name": graph_name,
+            "pid": os.getpid(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "source": source,
+        }
+        (running_dir / f"{run_id}.json").write_text(
+            json.dumps(data), encoding="utf-8",
+        )
+
+    @staticmethod
+    def remove_running_file(run_id: str, is_local: bool = False):
+        for d in get_all_running_dirs():
+            p = d / f"{run_id}.json"
+            if p.exists():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+    @staticmethod
+    def list_running() -> list[dict[str, Any]]:
+        results = []
+        for d in get_all_running_dirs():
+            if not d.is_dir():
+                continue
+            for p in d.glob("*.json"):
+                try:
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                    pid = data.get("pid", 0)
+                    if not _is_pid_alive(pid):
+                        p.unlink(missing_ok=True)
+                        continue
+                    elapsed = 0.0
+                    started = data.get("started_at", "")
+                    if started:
+                        try:
+                            st = datetime.fromisoformat(started)
+                            elapsed = (
+                                datetime.now(timezone.utc) - st
+                            ).total_seconds()
+                        except ValueError:
+                            pass
+                    results.append({
+                        "run_id": data.get("run_id", p.stem),
+                        "graph_name": data.get("graph_name", ""),
+                        "pid": pid,
+                        "started_at": started,
+                        "elapsed_seconds": round(elapsed, 1),
+                        "source": data.get("source", ""),
+                    })
+                except (json.JSONDecodeError, OSError):
+                    continue
+        return results
+
     def _save_log(self, run_info: RunInfo):
         try:
-            logs_dir = get_logs_dir()
+            logs_dir = get_logs_dir(run_info.is_local)
             log_data = {
                 "run_id": run_info.run_id,
                 "graph_name": run_info.graph_name,
@@ -85,53 +170,62 @@ class RunManager:
                 json.dumps(log_data, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-            print(f"[QGraph] Saved log: {log_path}", flush=True)
         except Exception as e:
-            print(f"[QGraph] Failed to save log for {run_info.run_id}: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
+            print(f"[QGraph] Failed to save log: {e}", flush=True)
 
     @staticmethod
     def load_log(run_id: str) -> dict[str, Any] | None:
-        log_path = get_logs_dir() / f"{run_id}.json"
-        if not log_path.exists():
-            return None
-        return json.loads(log_path.read_text(encoding="utf-8"))
+        for d in get_all_logs_dirs():
+            p = d / f"{run_id}.json"
+            if p.exists():
+                return json.loads(p.read_text(encoding="utf-8"))
+        return None
 
     @staticmethod
     def list_saved_logs() -> list[dict[str, Any]]:
         results = []
-        for path in sorted(get_logs_dir().glob("*.json"), reverse=True):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                results.append({
-                    "run_id": data.get("run_id", path.stem),
-                    "graph_name": data.get("graph_name", ""),
-                    "status": data.get("status", ""),
-                    "started_at": data.get("started_at", ""),
-                    "finished_at": data.get("finished_at"),
-                    "log_count": len(data.get("logs", [])),
-                })
-            except (json.JSONDecodeError, OSError):
+        seen: set[str] = set()
+        for d in get_all_logs_dirs():
+            if not d.is_dir():
                 continue
+            for path in d.glob("*.json"):
+                if path.stem in seen:
+                    continue
+                seen.add(path.stem)
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    results.append({
+                        "run_id": data.get("run_id", path.stem),
+                        "graph_name": data.get("graph_name", ""),
+                        "status": data.get("status", ""),
+                        "started_at": data.get("started_at", ""),
+                        "finished_at": data.get("finished_at"),
+                        "log_count": len(data.get("logs", [])),
+                    })
+                except (json.JSONDecodeError, OSError):
+                    continue
+        results.sort(key=lambda x: x.get("started_at", ""), reverse=True)
         return results
 
     @staticmethod
     def delete_log(run_id: str) -> bool:
-        log_path = get_logs_dir() / f"{run_id}.json"
-        if not log_path.exists():
-            return False
-        try:
-            log_path.unlink()
-        except OSError:
-            pass
-        return not log_path.exists()
+        deleted = False
+        for d in get_all_logs_dirs():
+            p = d / f"{run_id}.json"
+            if p.exists():
+                try:
+                    p.unlink()
+                    deleted = True
+                except OSError:
+                    pass
+        return deleted
 
     async def start_run(
         self,
         graph_name: str,
         graph_data: dict[str, Any],
         skip_nodes: set[str] | None = None,
+        is_local: bool = False,
     ) -> str:
         self._counter += 1
         run_id = f"run_{graph_name}_{self._counter}_{int(time.time())}"
@@ -139,8 +233,10 @@ class RunManager:
         run_info = RunInfo(
             run_id=run_id,
             graph_name=graph_name,
+            is_local=is_local,
         )
         self._runs[run_id] = run_info
+        self.write_running_file(run_id, graph_name, is_local, source="serve")
 
         async def on_log(gn: str, node_id: str, message: str):
             run_info.logs.append(f"[{node_id}] {message}")
@@ -161,7 +257,9 @@ class RunManager:
 
         async def _run():
             try:
-                results = await executor.execute(graph_data, skip_nodes=skip_nodes)
+                results = await executor.execute(
+                    graph_data, skip_nodes=skip_nodes,
+                )
                 from qgraph.core.models import NodeStatus
                 has_failed = any(
                     r.status == NodeStatus.FAILED for r in results.values()
@@ -173,6 +271,7 @@ class RunManager:
                 run_info.finished_at = time.time()
                 run_info.current_node = None
                 self._save_log(run_info)
+                self.remove_running_file(run_id, is_local)
 
         run_info.task = asyncio.create_task(_run())
         return run_id
@@ -189,6 +288,7 @@ class RunManager:
         run.finished_at = time.time()
         run.current_node = None
         self._save_log(run)
+        self.remove_running_file(run_id, run.is_local)
         return True
 
     def cleanup_finished(self, max_age_seconds: float = 3600):
