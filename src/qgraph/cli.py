@@ -12,7 +12,7 @@ def main():
 
 @main.command()
 @click.option("--port", default=9800, help="Port to run the server on")
-@click.option("--host", default="127.0.0.1", help="Host to bind the server to")
+@click.option("--host", default="0.0.0.0", help="Host to bind the server to")
 def serve(port: int, host: str):
     """Start the QGraph web UI server."""
     import uvicorn
@@ -105,8 +105,15 @@ def run(name: str, detach: bool):
             "success": "bold green",
             "failed": "bold red",
             "queued": "dim",
+            "skipped": "dim yellow",
         }.get(status, "")
-        icon = {"running": "⟳", "success": "✓", "failed": "✗", "queued": "◦"}.get(status, "○")
+        icon = {
+            "running": "⟳",
+            "success": "✓",
+            "failed": "✗",
+            "queued": "◦",
+            "skipped": "⊘",
+        }.get(status, "○")
         console.print(f"  [{style}]{icon} [{node_id}] → {status}[/{style}]")
 
     executor = PipelineExecutor(on_log=on_log, on_status=on_status)
@@ -114,13 +121,21 @@ def run(name: str, detach: bool):
 
     console.print()
     failed = sum(1 for r in results.values() if r.status == NodeStatus.FAILED)
+    skipped = sum(1 for r in results.values() if r.status == NodeStatus.SKIPPED)
     succeeded = sum(1 for r in results.values() if r.status == NodeStatus.SUCCESS)
 
     if failed > 0:
-        console.print(f"[bold red]Pipeline finished with errors: {succeeded} succeeded, {failed} failed[/bold red]")
+        parts = [f"{succeeded} succeeded", f"{failed} failed"]
+        if skipped > 0:
+            parts.append(f"{skipped} skipped")
+        msg = ", ".join(parts)
+        console.print(f"[bold red]Pipeline finished with errors: {msg}[/bold red]")
         sys.exit(1)
     else:
-        console.print(f"[bold green]Pipeline completed successfully: {succeeded} nodes[/bold green]")
+        console.print(
+            f"[bold green]Pipeline completed successfully: "
+            f"{succeeded} nodes[/bold green]"
+        )
 
 
 @main.command()

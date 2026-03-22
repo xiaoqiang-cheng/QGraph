@@ -3,15 +3,17 @@ interface ToolbarProps {
   onSave: () => void
   onRun: () => void
   onStop: () => void
+  onResume?: () => void
   isRunning: boolean
   isSaving: boolean
+  lastRunFailed?: boolean
   onBack?: () => void
   layoutDirection: 'LR' | 'TB'
   onToggleLayout: () => void
 }
 
 export default function Toolbar({
-  graphName, onSave, onRun, onStop, isRunning, isSaving, onBack,
+  graphName, onSave, onRun, onStop, onResume, isRunning, isSaving, lastRunFailed, onBack,
   layoutDirection, onToggleLayout,
 }: ToolbarProps) {
   const btnBase: React.CSSProperties = {
@@ -103,17 +105,33 @@ export default function Toolbar({
           ⏹ Stop
         </button>
       ) : (
-        <button
-          onClick={onRun}
-          style={{
-            ...btnBase,
-            background: 'var(--success)',
-            color: '#fff',
-            border: 'none',
-          }}
-        >
-          ▶ Run
-        </button>
+        <>
+          <button
+            onClick={onRun}
+            style={{
+              ...btnBase,
+              background: 'var(--success)',
+              color: '#fff',
+              border: 'none',
+            }}
+          >
+            ▶ Run
+          </button>
+          {lastRunFailed && onResume && (
+            <button
+              onClick={onResume}
+              style={{
+                ...btnBase,
+                background: '#f59e0b',
+                color: '#fff',
+                border: 'none',
+              }}
+              title="Resume from failed node (skip succeeded nodes)"
+            >
+              ↻ Resume
+            </button>
+          )}
+        </>
       )}
     </div>
   )

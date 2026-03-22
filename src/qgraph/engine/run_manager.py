@@ -120,7 +120,12 @@ class RunManager:
             pass
         return not log_path.exists()
 
-    async def start_run(self, graph_name: str, graph_data: dict[str, Any]) -> str:
+    async def start_run(
+        self,
+        graph_name: str,
+        graph_data: dict[str, Any],
+        skip_nodes: set[str] | None = None,
+    ) -> str:
         self._counter += 1
         run_id = f"run_{graph_name}_{self._counter}_{int(time.time())}"
 
@@ -149,7 +154,7 @@ class RunManager:
 
         async def _run():
             try:
-                results = await executor.execute(graph_data)
+                results = await executor.execute(graph_data, skip_nodes=skip_nodes)
                 from qgraph.core.models import NodeStatus
                 has_failed = any(
                     r.status == NodeStatus.FAILED for r in results.values()

@@ -31,6 +31,12 @@
   - RUNNING 状态标签 + 日志行数统计
   - Clear 清空按钮
   - 长文本自动换行（`pre-wrap` + `break-all`）
+- [x] ~~**`qgraph serve` 默认绑定 `0.0.0.0`**~~ ✅ 已完成
+  - 方便远程服务器场景访问，用户可通过 `--host 127.0.0.1` 限制本地访问
+- [x] ~~**节点自测（Test Node）**~~ ✅ 已完成
+  - ConfigPanel 底部 "▶ Test Node" 按钮（Shell/Python Script/Python Function 节点可用）
+  - 后端 `POST /api/nodes/test` 接口，构造单节点图执行，支持超时（默认 30s，上限 120s）
+  - 测试结果内嵌 ConfigPanel：状态（✓ Passed / ✗ Failed / ⏱ Timeout）+ 耗时 + 日志输出
 - [ ] **连线数据传递**：当前连线只表示执行依赖，不传递实际数据。需实现：
   - 上游节点 env_vars / stdout 输出 → 自动注入为下游节点的环境变量
   - 模板替换语法 `{{node_name.output.key}}`
@@ -56,6 +62,13 @@
 - [ ] 单步调试：逐节点执行，观察每步输出
 
 ### Phase 2+: 增强功能
+- [ ] **Quick Add — 粘贴命令智能创建节点**（已讨论，待细化设计）：
+  - 方案 A：Toolbar/画布输入框，粘贴命令自动解析为节点（纯前端字符串解析）
+    - `ENV=val python xxx.py --args` → Python Script 节点（提取 env_vars, script_path, args）
+    - `bash xxx.sh` 或其他 → Shell Command 节点
+    - `cd /path && cmd` → 提取 working_dir + command
+  - 方案 B：右键画布 "Paste as Node"，弹出预览确认后创建
+  - 方案 C：从 shell 脚本文件批量导入多个节点 + 自动连线
 - [ ] 日志预览增强：全屏模式、关键字搜索、按节点过滤日志
 - [ ] 详细进度监控（进度条、耗时统计）
 - [ ] 结构化 JSON 数据流（节点间传递 JSON 对象）
@@ -99,3 +112,10 @@
 - [x] 日志格式精简：`logs` 数组从 `[{node_id, message, time}]` 改为 `["[node_id] message"]`，体积 -59%，向下兼容旧格式
 - [x] `qgraph ps -a` 离线模式：服务器未运行时自动读取本地日志文件展示历史
 - [x] `dev.py` 进程管理修复：后端异常退出时自动清理前端 Vite 进程
+- [x] `qgraph serve` 默认绑定 `0.0.0.0`，方便远程服务器访问
+- [x] 节点自测（Test Node）：ConfigPanel 内 "▶ Test Node" 按钮，单节点执行 + 日志输出 + 超时控制
+- [x] 节点失败后下游自动跳过（skipped），级联传播，CLI 显示 `⊘ skipped`
+- [x] Test Node 中断：测试运行中可点击 "⏹ Stop Test" 取消，后端 `POST /api/nodes/test/stop`
+- [x] 断点续传（Resume）：Pipeline 失败后 Toolbar 出现 "↻ Resume" 按钮，跳过已成功节点从失败处重新执行
+- [x] 面板边界可拖拽调整宽度（Sidebar / ConfigPanel / LogPanel）
+- [x] Test Node 日志实时推送：通过 WebSocket `test_log` 消息实时显示，不再等请求完成

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { NodeData, NodeType } from '../types'
 import { NODE_TYPE_LABELS, NODE_TYPE_COLORS } from '../types'
 
@@ -6,9 +6,16 @@ interface ConfigPanelProps {
   node: NodeData | null
   onUpdate: (nodeId: string, updates: Partial<NodeData>) => void
   onClose: () => void
+  graphName: string
+  testLogs: string[]
+  onStartTest: (nodeType: string, config: Record<string, unknown>) => void
+  onStopTest: () => void
+  isTesting: boolean
+  testResult: { status: string; error: string | null; duration_ms?: number } | null
+  width?: number
 }
 
-export default function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
+export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStartTest, onStopTest, isTesting, testResult, width }: ConfigPanelProps) {
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
   const [workingDir, setWorkingDir] = useState('')
@@ -17,6 +24,7 @@ export default function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProp
   const [pythonPath, setPythonPath] = useState('')
   const [modulePath, setModulePath] = useState('')
   const [functionName, setFunctionName] = useState('')
+  const testLogEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (node) {
@@ -48,6 +56,25 @@ export default function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProp
       },
     })
   }
+
+  const handleTest = () => {
+    handleSave()
+    const config: Record<string, unknown> = {
+      ...node.config,
+      command: command || undefined,
+      working_dir: workingDir || undefined,
+      script_path: scriptPath || undefined,
+      args: args ? args.split(/\s+/) : [],
+      python_path: pythonPath || undefined,
+      module_path: modulePath || undefined,
+      function_name: functionName || undefined,
+    }
+    onStartTest(node.node_type, config)
+  }
+
+  useEffect(() => {
+    testLogEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [testLogs])
 
   const color = NODE_TYPE_COLORS[node.node_type]
 
@@ -180,7 +207,7 @@ export default function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProp
 
   return (
     <div style={{
-      width: 300,
+      width: width ?? 300,
       background: 'var(--bg-secondary)',
       borderLeft: '1px solid var(--border)',
       display: 'flex',
@@ -235,6 +262,109 @@ export default function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProp
         </div>
 
         {renderTypeConfig(node.node_type)}
+
+        {node.node_type !== 'input' && node.node_type !== 'output' && (
+          <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+            {isTesting ? (
+              <button
+                onClick={onStopTest}
+                style={{
+                  width: '100%',
+                  padding: '8px 0',
+                  background: '#ef4444',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+              >
+                ⏹ Stop Test
+              </button>
+            ) : (
+              <button
+                onClick={handleTest}
+                style={{
+                  width: '100%',
+                  padding: '8px 0',
+                  background: '#22c55e',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+              >
+                ▶ Test Node
+              </button>
+            )}
+
+            {(testLogs.length > 0 || testResult) && (
+              <div style={{
+                marginTop: 10,
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                overflow: 'hidden',
+              }}>
+                {testResult && (
+                  <div style={{
+                    padding: '6px 10px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    borderBottom: testLogs.length > 0 ? '1px solid var(--border)' : 'none',
+                    color: testResult.status === 'success' ? '#22c55e'
+                      : testResult.status === 'timeout' ? '#f59e0b'
+                      : testResult.status === 'cancelled' ? '#f59e0b'
+                      : '#ef4444',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}>
+                    <span>
+                      {testResult.status === 'success' ? '✓ Passed' : testResult.status === 'timeout' ? '⏱ Timeout' : testResult.status === 'cancelled' ? '⏹ Cancelled' : '✗ Failed'}
+                      {testResult.error && `: ${testResult.error}`}
+                    </span>
+                    {testResult.duration_ms != null && (
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>
+                        {testResult.duration_ms.toFixed(0)}ms
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {testLogs.length > 0 && (
+                  <div style={{
+                    maxHeight: 200,
+                    overflowY: 'auto',
+                    padding: '8px 10px',
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    lineHeight: 1.5,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    color: 'var(--text-secondary)',
+                  }}>
+                    {testLogs.map((line, i) => (
+                      <div key={i}>{line}</div>
+                    ))}
+                    <div ref={testLogEndRef} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

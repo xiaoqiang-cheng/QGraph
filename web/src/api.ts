@@ -34,9 +34,10 @@ export const api = {
   deleteGraph: (name: string) =>
     request<{ status: string }>(`/graphs/${encodeURIComponent(name)}/delete`, { method: 'POST' }),
 
-  runGraph: (name: string) =>
+  runGraph: (name: string, skipNodes?: string[]) =>
     request<{ status: string; run_id: string }>(`/graphs/${encodeURIComponent(name)}/run`, {
       method: 'POST',
+      body: skipNodes ? JSON.stringify({ skip_nodes: skipNodes }) : undefined,
     }),
 
   listRuns: () => request<RunInfo[]>('/runs'),
@@ -51,4 +52,16 @@ export const api = {
 
   stopRun: (runId: string) =>
     request<{ status: string }>(`/runs/${encodeURIComponent(runId)}/stop`, { method: 'POST' }),
+
+  testNode: (nodeType: string, config: Record<string, unknown>, graphName?: string, timeout?: number, testId?: string) =>
+    request<{ status: string; logs: string[]; error: string | null; duration_ms?: number; test_id: string }>('/nodes/test', {
+      method: 'POST',
+      body: JSON.stringify({ node_type: nodeType, config, graph_name: graphName, timeout: timeout ?? 30, test_id: testId }),
+    }),
+
+  stopTest: (testId: string) =>
+    request<{ status: string }>('/nodes/test/stop', {
+      method: 'POST',
+      body: JSON.stringify({ test_id: testId }),
+    }),
 }

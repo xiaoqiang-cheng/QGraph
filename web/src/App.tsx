@@ -89,6 +89,18 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
   const nodeDataMap = useRef<Map<string, NodeData>>(new Map())
   const wsRef = useRef<WebSocket | null>(null)
 
+  const [sidebarWidth, setSidebarWidth] = useState(220)
+  const [configWidth, setConfigWidth] = useState(300)
+  const sidebarDrag = useRef<{ startX: number; startW: number } | null>(null)
+  const configDrag = useRef<{ startX: number; startW: number } | null>(null)
+
+  const [isTesting, setIsTesting] = useState(false)
+  const [testLogs, setTestLogs] = useState<string[]>([])
+  const [testResult, setTestResult] = useState<{ status: string; error: string | null; duration_ms?: number } | null>(null)
+  const activeTestId = useRef<string | null>(null)
+  const [lastRunFailed, setLastRunFailed] = useState(false)
+  const succeededNodes = useRef<Set<string>>(new Set())
+
   const nodeTypes = useMemo(() => ({ pipeline: PipelineNode }), [])
 
   const selectedNodeData = selectedNodeId ? nodeDataMap.current.get(selectedNodeId) || null : null
@@ -114,9 +126,20 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
           setShowLogs(true)
         }
 
+        if (msg.type === 'test_log' && msg.message && msg.test_id) {
+          if (msg.test_id === activeTestId.current) {
+            setTestLogs(prev => [...prev, msg.message!])
+          }
+        }
+
         if (msg.type === 'node_status' && msg.node_id && msg.status) {
           const status = msg.status as NodeStatus
           const nodeId = msg.node_id
+
+          if (status === 'success') {
+            succeededNodes.current.add(nodeId)
+          }
+
           setNodes(nds => nds.map(n => {
             if (n.id !== nodeId) return n
             return {
@@ -130,14 +153,20 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
             nodeDataMap.current.set(nodeId, { ...nd, status })
           }
 
-          const allDone = ['success', 'failed', 'cancelled'].includes(status)
+          const allDone = ['success', 'failed', 'cancelled', 'skipped'].includes(status)
           if (allDone) {
             setTimeout(() => {
               setNodes(nds => {
                 const anyRunning = nds.some(n =>
                   ['running', 'queued'].includes((n.data as Record<string, unknown>).status as string)
                 )
-                if (!anyRunning) setIsRunning(false)
+                if (!anyRunning) {
+                  setIsRunning(false)
+                  const hasFailed = nds.some(n =>
+                    ['failed', 'skipped'].includes((n.data as Record<string, unknown>).status as string)
+                  )
+                  setLastRunFailed(hasFailed)
+                }
                 return nds
               })
             }, 100)
@@ -206,7 +235,15 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
   }, [])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    setSelectedNodeId(node.id)
+    setSelectedNodeId(prev => {
+      if (prev !== node.id) {
+        setTestLogs([])
+        setTestResult(null)
+        setIsTesting(false)
+        activeTestId.current = null
+      }
+      return node.id
+    })
   }, [])
 
   const onPaneClick = useCallback(() => {
@@ -273,6 +310,8 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
     setIsRunning(true)
     setLogs([])
     setShowLogs(true)
+    setLastRunFailed(false)
+    succeededNodes.current.clear()
 
     setNodes(nds => nds.map(n => ({
       ...n,
@@ -283,6 +322,31 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
       await api.runGraph(graphName)
     } catch (err) {
       console.error('Run failed:', err)
+      setIsRunning(false)
+    }
+  }, [handleSave, graphName, setNodes])
+
+  const handleResume = useCallback(async () => {
+    await handleSave()
+    const skipList = Array.from(succeededNodes.current)
+    setIsRunning(true)
+    setLogs([])
+    setShowLogs(true)
+    setLastRunFailed(false)
+
+    setNodes(nds => nds.map(n => {
+      const st = (n.data as Record<string, unknown>).status as string
+      if (st === 'success') return n
+      return {
+        ...n,
+        data: { ...(n.data as Record<string, unknown>), status: 'idle' },
+      }
+    }))
+
+    try {
+      await api.runGraph(graphName, skipList)
+    } catch (err) {
+      console.error('Resume failed:', err)
       setIsRunning(false)
     }
   }, [handleSave, graphName, setNodes])
@@ -300,6 +364,72 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
     setIsRunning(false)
   }, [graphName])
 
+  const handleStartTest = useCallback(async (nodeType: string, config: Record<string, unknown>) => {
+    const testId = `test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    activeTestId.current = testId
+    setIsTesting(true)
+    setTestLogs([])
+    setTestResult(null)
+
+    try {
+      const result = await api.testNode(nodeType, config, graphName, 30, testId)
+      setTestResult({ status: result.status, error: result.error, duration_ms: result.duration_ms })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setTestResult({ status: 'error', error: message })
+    } finally {
+      setIsTesting(false)
+      activeTestId.current = null
+    }
+  }, [graphName])
+
+  const handleStopTest = useCallback(async () => {
+    const testId = activeTestId.current
+    if (!testId) return
+    try {
+      await api.stopTest(testId)
+    } catch {
+      // ignore
+    }
+    setIsTesting(false)
+    setTestResult({ status: 'cancelled', error: 'Test cancelled by user' })
+    activeTestId.current = null
+  }, [])
+
+  const onSidebarDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    sidebarDrag.current = { startX: e.clientX, startW: sidebarWidth }
+    const onMove = (ev: MouseEvent) => {
+      if (!sidebarDrag.current) return
+      const delta = ev.clientX - sidebarDrag.current.startX
+      setSidebarWidth(Math.max(160, Math.min(400, sidebarDrag.current.startW + delta)))
+    }
+    const onUp = () => {
+      sidebarDrag.current = null
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [sidebarWidth])
+
+  const onConfigDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    configDrag.current = { startX: e.clientX, startW: configWidth }
+    const onMove = (ev: MouseEvent) => {
+      if (!configDrag.current) return
+      const delta = configDrag.current.startX - ev.clientX
+      setConfigWidth(Math.max(240, Math.min(500, configDrag.current.startW + delta)))
+    }
+    const onUp = () => {
+      configDrag.current = null
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [configWidth])
+
   const handleLoad = useCallback(async () => {
     try {
       const data = await api.getGraph(graphName)
@@ -315,6 +445,34 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
           targetHandle: e.target_port,
         })))
         setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.3 }), 100)
+
+        try {
+          const history = await api.listRunHistory()
+          const lastRun = history.find(r => r.graph_name === graphName)
+          if (lastRun && lastRun.status === 'failed') {
+            const logData = await api.getRunLogs(lastRun.run_id)
+            if (logData && logData.node_statuses) {
+              const succeeded = new Set<string>()
+              for (const [nid, st] of Object.entries(logData.node_statuses)) {
+                if (st === 'success') succeeded.add(nid)
+              }
+              if (succeeded.size > 0) {
+                succeededNodes.current = succeeded
+                setLastRunFailed(true)
+                setNodes(nds => nds.map(n => {
+                  const st = logData.node_statuses[n.id]
+                  if (!st || st === 'idle') return n
+                  return {
+                    ...n,
+                    data: { ...(n.data as Record<string, unknown>), status: st },
+                  }
+                }))
+              }
+            }
+          }
+        } catch {
+          // history not available
+        }
       }
     } catch {
       // graph doesn't exist yet
@@ -339,9 +497,24 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
     })
   }, [setNodes])
 
+  const resizeHandleStyle: React.CSSProperties = {
+    position: 'absolute',
+    top: 0,
+    width: 6,
+    height: '100%',
+    cursor: 'ew-resize',
+    zIndex: 10,
+  }
+
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw' }}>
-      <Sidebar onAddNode={addNode} theme={theme} onToggleTheme={toggleTheme} onBack={onBack} />
+      <div style={{ width: sidebarWidth, flexShrink: 0, position: 'relative' }}>
+        <Sidebar onAddNode={addNode} theme={theme} onToggleTheme={toggleTheme} onBack={onBack} width={sidebarWidth} />
+        <div
+          onMouseDown={onSidebarDragStart}
+          style={{ ...resizeHandleStyle, right: -3 }}
+        />
+      </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <Toolbar
@@ -349,8 +522,10 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
           onSave={handleSave}
           onRun={handleRun}
           onStop={handleStop}
+          onResume={handleResume}
           isRunning={isRunning}
           isSaving={isSaving}
+          lastRunFailed={lastRunFailed}
           onBack={onBack}
           layoutDirection={layoutDirection}
           onToggleLayout={toggleLayout}
@@ -397,11 +572,24 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
       </div>
 
       {selectedNodeData && (
-        <ConfigPanel
-          node={selectedNodeData}
-          onUpdate={onNodeUpdate}
-          onClose={() => setSelectedNodeId(null)}
-        />
+        <div style={{ width: configWidth, flexShrink: 0, position: 'relative' }}>
+          <div
+            onMouseDown={onConfigDragStart}
+            style={{ ...resizeHandleStyle, left: -3 }}
+          />
+          <ConfigPanel
+            node={selectedNodeData}
+            onUpdate={onNodeUpdate}
+            onClose={() => setSelectedNodeId(null)}
+            graphName={graphName}
+            testLogs={testLogs}
+            onStartTest={handleStartTest}
+            onStopTest={handleStopTest}
+            isTesting={isTesting}
+            testResult={testResult}
+            width={configWidth}
+          />
+        </div>
       )}
     </div>
   )

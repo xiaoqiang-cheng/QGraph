@@ -27,18 +27,50 @@ class PipelineExecutor:
         if self._on_status:
             await self._on_status(graph_name, node_id, status)
 
-    async def execute(self, graph_data: dict[str, Any]) -> dict[str, ExecutionResult]:
+    async def execute(
+        self,
+        graph_data: dict[str, Any],
+        skip_nodes: set[str] | None = None,
+    ) -> dict[str, ExecutionResult]:
         graph = Graph(**graph_data)
         graph_name = graph.name
         adj: dict[str, list[str]] = defaultdict(list)
+        parents: dict[str, list[str]] = defaultdict(list)
         in_degree: dict[str, int] = {node.id: 0 for node in graph.nodes}
 
         for edge in graph.edges:
             adj[edge.source].append(edge.target)
+            parents[edge.target].append(edge.source)
             in_degree[edge.target] = in_degree.get(edge.target, 0) + 1
 
         queue: list[str] = [nid for nid, deg in in_degree.items() if deg == 0]
         node_map = {node.id: node for node in graph.nodes}
+        failed_nodes: set[str] = set()
+        _skip = skip_nodes or set()
+
+        if _skip:
+            pending = list(_skip)
+            while pending:
+                nid = pending.pop(0)
+                if nid not in node_map or nid in self._results:
+                    continue
+                self._results[nid] = ExecutionResult(
+                    node_id=nid, status=NodeStatus.SUCCESS
+                )
+                await self._emit_log(
+                    graph_name, nid,
+                    f"[{node_map[nid].name}] Skipped (already succeeded)",
+                )
+                await self._emit_status(graph_name, nid, "success")
+                for neighbor in adj[nid]:
+                    in_degree[neighbor] -= 1
+                    if in_degree[neighbor] == 0:
+                        if neighbor in _skip:
+                            pending.append(neighbor)
+            queue = [
+                nid for nid, deg in in_degree.items()
+                if deg == 0 and nid not in self._results
+            ]
 
         for nid in queue:
             await self._emit_status(graph_name, nid, "queued")
@@ -61,14 +93,47 @@ class PipelineExecutor:
                     )
                     await self._emit_status(graph_name, node_id, "failed")
                     await self._emit_log(graph_name, node_id, f"ERROR: {result}")
+                    failed_nodes.add(node_id)
                 else:
                     self._results[node_id] = result
+                    if result.status == NodeStatus.FAILED:
+                        failed_nodes.add(node_id)
 
                 for neighbor in adj[node_id]:
                     in_degree[neighbor] -= 1
                     if in_degree[neighbor] == 0:
-                        next_queue.append(neighbor)
-                        await self._emit_status(graph_name, neighbor, "queued")
+                        has_failed_parent = any(
+                            p in failed_nodes for p in parents[neighbor]
+                        )
+                        if has_failed_parent:
+                            skip_queue = [neighbor]
+                            while skip_queue:
+                                skip_nid = skip_queue.pop(0)
+                                if skip_nid in self._results:
+                                    continue
+                                failed_nodes.add(skip_nid)
+                                self._results[skip_nid] = ExecutionResult(
+                                    node_id=skip_nid,
+                                    status=NodeStatus.SKIPPED,
+                                )
+                                await self._emit_status(
+                                    graph_name, skip_nid, "skipped"
+                                )
+                                await self._emit_log(
+                                    graph_name,
+                                    skip_nid,
+                                    f"[{node_map[skip_nid].name}] "
+                                    f"Skipped: upstream node failed",
+                                )
+                                for desc in adj[skip_nid]:
+                                    in_degree[desc] -= 1
+                                    if in_degree[desc] == 0:
+                                        skip_queue.append(desc)
+                        else:
+                            next_queue.append(neighbor)
+                            await self._emit_status(
+                                graph_name, neighbor, "queued"
+                            )
 
             queue = next_queue
 

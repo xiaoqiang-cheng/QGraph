@@ -6,11 +6,12 @@ interface SidebarProps {
   theme: 'dark' | 'light'
   onToggleTheme: () => void
   onBack?: () => void
+  width?: number
 }
 
 const NODE_TYPES: NodeType[] = ['shell_command', 'python_script', 'python_function', 'input', 'output']
 
-export default function Sidebar({ onAddNode, theme, onToggleTheme, onBack }: SidebarProps) {
+export default function Sidebar({ onAddNode, theme, onToggleTheme, onBack, width }: SidebarProps) {
   const onDragStart = (event: React.DragEvent, nodeType: NodeType) => {
     event.dataTransfer.setData('application/qgraph-node-type', nodeType)
     event.dataTransfer.effectAllowed = 'move'
@@ -18,7 +19,7 @@ export default function Sidebar({ onAddNode, theme, onToggleTheme, onBack }: Sid
 
   return (
     <div style={{
-      width: 220,
+      width: width ?? 220,
       background: 'var(--bg-secondary)',
       borderRight: '1px solid var(--border)',
       display: 'flex',

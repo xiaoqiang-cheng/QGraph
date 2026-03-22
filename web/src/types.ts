@@ -61,12 +61,13 @@ export interface RunInfo {
 }
 
 export interface WsMessage {
-  type: 'log' | 'node_status' | 'run_update' | 'ping' | 'pong'
+  type: 'log' | 'node_status' | 'run_update' | 'ping' | 'pong' | 'test_log' | 'test_status'
   graph_name?: string
   node_id?: string
   message?: string
   status?: string
   run_id?: string
+  test_id?: string
 }
 
 export interface RunHistoryEntry {
