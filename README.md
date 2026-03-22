@@ -23,6 +23,7 @@
 - **断点续传** — Pipeline 失败后可从失败节点处 Resume，跳过已成功节点
 - **Quick Add** — 双击画布粘贴命令，自动解析创建节点；多行脚本自动生成串行连线
 - **项目级存储** — `qgraph init` 初始化本地 `.qgraph/`，图和日志跟随项目管理
+- **AI 原生支持** — 自动生成 `QGRAPH.md`，AI 编码工具可直接创建和运行 Pipeline
 - **轻量零依赖** — `pip install` 即用，前端打包在 Python 包内，无需 Node.js
 - **双模式** — Web UI + CLI 行为完全一致，状态互通，`qgraph run` 不需要启动 Web 服务
 
@@ -61,6 +62,7 @@
 - [CLI 命令参考](#cli-命令参考)
 - [示例：ML 训练流水线](#示例ml-训练流水线)
 - [数据存储](#数据存储)
+- [AI 辅助集成](#ai-辅助集成)
 - [技术架构](#技术架构)
 - [开发指南](#开发指南)
 
@@ -449,6 +451,29 @@ qgraph init
 - **running/**：运行中进程的状态文件（PID + 开始时间），进程结束自动清理
 
 Pipeline JSON 文件可以直接用 `qgraph export` / `qgraph import` 进行备份和共享。
+
+---
+
+## AI 辅助集成
+
+QGraph 对 AI 编码工具（Cursor、Trae、Copilot、Claude 等）提供原生支持。
+
+执行 `qgraph init` 时，会在项目根目录自动生成 `QGRAPH.md` 文件。这个文件包含 QGraph 的完整使用指南，任何 AI 编码工具打开项目时都会自动读取，从而了解如何使用 QGraph。
+
+**AI 可以做什么**：
+
+- 根据用户需求自动生成 Pipeline JSON 文件
+- 直接写入 `.qgraph/graphs/` 目录
+- 建议使用 `qgraph run` 或 `qgraph serve` 运行
+- 理解节点类型、连线、参数传递等完整语义
+
+**示例交互**：
+
+```
+用户：帮我创建一个 Pipeline，先跑 prepare.py，再并行跑 train.py 和 evaluate.py，最后跑 export.py
+AI：（读取 AGENTS.md 后，直接生成正确格式的 JSON 到 .qgraph/graphs/）
+     运行：qgraph run my-pipeline
+```
 
 ---
 

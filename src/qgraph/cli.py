@@ -27,9 +27,19 @@ def serve(port: int, host: str):
 @main.command()
 def init():
     """Initialize .qgraph/ in the current directory for local graph storage."""
+    import shutil
+    from pathlib import Path
+
     from qgraph.core.storage import GraphStorage
 
     local_dir = GraphStorage.init_local()
+
+    template = Path(__file__).parent / "templates" / "ai_rules.md"
+    agents_md = Path("QGRAPH.md")
+    if template.exists() and not agents_md.exists():
+        shutil.copy2(str(template), str(agents_md))
+        click.echo(f"  Created {agents_md}")
+
     click.echo(f"Initialized QGraph project: {local_dir}")
     click.echo("Graphs will be stored in .qgraph/graphs/ (local to this project)")
 
