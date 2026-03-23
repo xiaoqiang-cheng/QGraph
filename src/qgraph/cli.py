@@ -130,6 +130,7 @@ def run(name: str, detach: bool):
     async def on_log(_gn: str, node_id: str, message: str):
         console.print(f"  {message}")
         all_logs.append(message)
+        RunManager.append_live_log(run_id, f"[{node_id}] {message}", is_local)
 
     async def on_status(_gn: str, node_id: str, status: str):
         node_statuses[node_id] = status
@@ -154,6 +155,7 @@ def run(name: str, detach: bool):
         results = asyncio.run(executor.execute(graph_data))
     finally:
         RunManager.remove_running_file(run_id, is_local)
+        RunManager.remove_live_log(run_id)
 
     console.print()
     failed = sum(1 for r in results.values() if r.status == NodeStatus.FAILED)
@@ -296,14 +298,69 @@ def ps(show_all: bool):
 
 @main.command()
 @click.argument("run_id")
-def logs(run_id: str):
-    """Show logs for a run. Tries server first, falls back to saved logs."""
+@click.option("-f", "--follow", is_flag=True, help="Follow live logs (tail -f mode)")
+def logs(run_id: str, follow: bool):
+    """Show logs for a run. Use -f to follow a running execution."""
     import json
+    import time
     import urllib.request
 
     from rich.console import Console
 
+    from qgraph.engine.run_manager import RunManager
+
     console = Console()
+
+    if not follow:
+        running = RunManager.list_running()
+        is_running = any(r["run_id"] == run_id for r in running)
+        if is_running:
+            console.print(
+                f"[bold yellow]Run '{run_id}' is still in progress. "
+                f"Switching to follow mode...[/bold yellow]"
+            )
+            console.print()
+            follow = True
+
+    if follow:
+        console.print(f"[bold cyan]Following logs for:[/bold cyan] {run_id}")
+        console.print("[dim]Press Ctrl+C to stop[/dim]")
+        console.print()
+        seen_count = 0
+        try:
+            while True:
+                lines = RunManager.read_live_log(run_id)
+                if len(lines) > seen_count:
+                    for line in lines[seen_count:]:
+                        is_err = "Failed" in line or "ERROR" in line or "[stderr]" in line
+                        is_ok = "Completed" in line or "successfully" in line
+                        if is_err:
+                            console.print(f"[red]  {line}[/red]")
+                        elif is_ok:
+                            console.print(f"[green]  {line}[/green]")
+                        else:
+                            console.print(f"  {line}")
+                    seen_count = len(lines)
+
+                running = RunManager.list_running()
+                still_running = any(r["run_id"] == run_id for r in running)
+                if not still_running and len(lines) == seen_count:
+                    final_log = RunManager.load_log(run_id)
+                    if final_log and final_log.get("logs"):
+                        for line in final_log["logs"][seen_count:]:
+                            msg = str(line)
+                            console.print(f"  {msg}")
+                    console.print()
+                    status = final_log.get("status", "unknown") if final_log else "unknown"
+                    color = "green" if status == "completed" else "red"
+                    console.print(f"[{color}]Run finished: {status}[/{color}]")
+                    break
+
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            console.print("\n[dim]Stopped following.[/dim]")
+        return
+
     log_data = None
 
     try:
@@ -314,14 +371,12 @@ def logs(run_id: str):
         pass
 
     if log_data is None:
-        from qgraph.engine.run_manager import RunManager
         log_data = RunManager.load_log(run_id)
 
     if log_data is None:
         console.print(f"[red]Logs for run '{run_id}' not found.[/red]")
         console.print()
         console.print("Available runs:")
-        from qgraph.engine.run_manager import RunManager
         for entry in RunManager.list_saved_logs()[:10]:
             status_color = "green" if entry["status"] == "completed" else "red"
             console.print(

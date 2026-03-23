@@ -195,6 +195,21 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
                     ['failed', 'skipped'].includes((n.data as Record<string, unknown>).status as string)
                   )
                   setLastRunFailed(hasFailed)
+                  if (!hasFailed) {
+                    setTimeout(() => {
+                      setNodes(prev => prev.map(n => ({
+                        ...n,
+                        data: {
+                          ...(n.data as Record<string, unknown>),
+                          status: 'idle',
+                          durationMs: undefined,
+                        },
+                      })))
+                      for (const [id, nd] of nodeDataMap.current.entries()) {
+                        nodeDataMap.current.set(id, { ...nd, status: 'idle' })
+                      }
+                    }, 3000)
+                  }
                 }
                 return nds
               })
@@ -406,6 +421,7 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
           name: (n.data as Record<string, unknown>).label as string || n.id,
           node_type: (n.data as Record<string, unknown>).nodeType as NodeType,
           position: n.position,
+          status: 'idle' as const,
         }
       })
 
@@ -560,8 +576,10 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
       const data = await api.getGraph(graphName)
       if (data.nodes && data.nodes.length > 0) {
         nodeDataMap.current.clear()
-        data.nodes.forEach(n => nodeDataMap.current.set(n.id, n))
-        setNodes(data.nodes.map(n => nodeDataToFlowNode(n, layoutDirection)))
+        data.nodes.forEach(n => {
+          nodeDataMap.current.set(n.id, { ...n, status: 'idle' })
+        })
+        setNodes(data.nodes.map(n => nodeDataToFlowNode({ ...n, status: 'idle' }, layoutDirection)))
         setEdges(data.edges.map(e => ({
           id: e.id,
           source: e.source,
@@ -572,26 +590,33 @@ function EditorView({ graphName, onBack }: { graphName: string; onBack: () => vo
         setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.3 }), 100)
 
         try {
-          const history = await api.listRunHistory()
-          const lastRun = history.find(r => r.graph_name === graphName)
-          if (lastRun && lastRun.status === 'failed') {
-            const logData = await api.getRunLogs(lastRun.run_id)
-            if (logData && logData.node_statuses) {
-              const succeeded = new Set<string>()
-              for (const [nid, st] of Object.entries(logData.node_statuses)) {
-                if (st === 'success') succeeded.add(nid)
-              }
-              if (succeeded.size > 0) {
-                succeededNodes.current = succeeded
-                setLastRunFailed(true)
-                setNodes(nds => nds.map(n => {
-                  const st = logData.node_statuses[n.id]
-                  if (!st || st === 'idle') return n
-                  return {
-                    ...n,
-                    data: { ...(n.data as Record<string, unknown>), status: st },
-                  }
-                }))
+          const runs = await api.listRuns()
+          const activeRun = runs.find(r => r.graph_name === graphName && r.status === 'running')
+          if (activeRun) {
+            setIsRunning(true)
+            setShowLogs(true)
+          } else {
+            const history = await api.listRunHistory()
+            const lastRun = history.find(r => r.graph_name === graphName)
+            if (lastRun && lastRun.status === 'failed') {
+              const logData = await api.getRunLogs(lastRun.run_id)
+              if (logData && logData.node_statuses) {
+                const succeeded = new Set<string>()
+                for (const [nid, st] of Object.entries(logData.node_statuses)) {
+                  if (st === 'success') succeeded.add(nid)
+                }
+                if (succeeded.size > 0) {
+                  succeededNodes.current = succeeded
+                  setLastRunFailed(true)
+                  setNodes(nds => nds.map(n => {
+                    const st = logData.node_statuses[n.id]
+                    if (!st || st === 'idle') return n
+                    return {
+                      ...n,
+                      data: { ...(n.data as Record<string, unknown>), status: st },
+                    }
+                  }))
+                }
               }
             }
           }

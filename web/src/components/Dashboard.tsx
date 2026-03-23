@@ -8,29 +8,68 @@ interface DashboardProps {
   onToggleTheme: () => void
 }
 
+function RunIdBadge({ runId }: { runId: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <span
+      title="Double-click to copy Run ID"
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        navigator.clipboard.writeText(runId).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        })
+      }}
+      style={{
+        fontFamily: 'monospace',
+        fontSize: 11,
+        color: copied ? 'var(--success)' : 'var(--accent)',
+        cursor: 'pointer',
+        padding: '1px 6px',
+        borderRadius: 4,
+        background: copied ? 'rgba(34,197,94,0.1)' : 'rgba(99,102,241,0.08)',
+        userSelect: 'all',
+        transition: 'all 0.15s',
+      }}
+    >{copied ? 'Copied!' : runId}</span>
+  )
+}
+
 function LogViewer({ runId, onClose }: { runId: string; onClose: () => void }) {
   const [logData, setLogData] = useState<RunLogData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+  const [autoScroll] = useState(true)
 
   useEffect(() => {
     let active = true
+    let pollTimer: ReturnType<typeof setTimeout>
+
     const load = async () => {
       try {
         const data = await api.getRunLogs(runId)
-        if (active) { setLogData(data); setLoading(false) }
+        if (active) {
+          setLogData(data)
+          setLoading(false)
+          if (data.status === 'running') {
+            pollTimer = setTimeout(load, 1000)
+          }
+        }
       } catch (err) {
         if (active) { setError(String(err)); setLoading(false) }
       }
     }
     load()
-    return () => { active = false }
+    return () => { active = false; clearTimeout(pollTimer) }
   }, [runId])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logData])
+    if (autoScroll) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [logData, autoScroll])
 
   const statusColor = (s: string) =>
     s === 'completed' ? 'var(--success)' : s === 'failed' || s.startsWith('error') ? 'var(--error)' : 'var(--warning)'
@@ -79,10 +118,12 @@ function LogViewer({ runId, onClose }: { runId: string; onClose: () => void }) {
                 fontSize: 11,
                 padding: '2px 8px',
                 borderRadius: 4,
-                background: logData.status === 'completed' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
+                background: logData.status === 'completed' ? 'rgba(34,197,94,0.12)'
+                  : logData.status === 'running' ? 'rgba(245,158,11,0.12)'
+                  : 'rgba(239,68,68,0.12)',
                 color: statusColor(logData.status),
                 fontWeight: 500,
-              }}>{logData.status}</span>
+              }}>{logData.status}{logData.status === 'running' ? '...' : ''}</span>
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 {logData.logs.length} lines
               </span>
@@ -484,6 +525,9 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
                     }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{run.graph_name}</div>
+                        <div style={{ marginTop: 3 }}>
+                          <RunIdBadge runId={run.run_id} />
+                        </div>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                           {run.elapsed_seconds}s
                           {run.current_node && (
@@ -514,6 +558,10 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
                         onClick={() => onOpenGraph(run.graph_name)}
                         style={{ ...btnStyle, fontSize: 11, padding: '4px 10px', color: 'var(--accent)' }}
                       >View</button>
+                      <button
+                        onClick={() => setViewingLog(run.run_id)}
+                        style={{ ...btnStyle, fontSize: 11, padding: '4px 10px', color: 'var(--warning)' }}
+                      >Logs</button>
                       <button
                         onClick={() => handleStop(run.run_id)}
                         style={{
@@ -599,12 +647,19 @@ export default function Dashboard({ onOpenGraph, theme, onToggleTheme }: Dashboa
                           <div style={{
                             fontSize: 10,
                             color: 'var(--text-muted)',
+                            marginTop: 2,
+                          }}>
+                            <RunIdBadge runId={entry.run_id} />
+                          </div>
+                          <div style={{
+                            fontSize: 10,
+                            color: 'var(--text-muted)',
                             marginTop: 1,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
                           }}>
-                            {entry.started_at ? new Date(entry.started_at).toLocaleString() : entry.run_id}
+                            {entry.started_at ? new Date(entry.started_at).toLocaleString() : ''}
                             <span style={{ marginLeft: 6 }}>{entry.log_count} lines</span>
                           </div>
                         </div>

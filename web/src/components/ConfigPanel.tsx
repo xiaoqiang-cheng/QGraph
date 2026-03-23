@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { NodeData, NodeType } from '../types'
 import { NODE_TYPE_LABELS, NODE_TYPE_COLORS } from '../types'
+import CodeEditor from './CodeEditor'
 
 interface ConfigPanelProps {
   node: NodeData | null
@@ -13,6 +14,10 @@ interface ConfigPanelProps {
   isTesting: boolean
   testResult: { status: string; error: string | null; duration_ms?: number } | null
   width?: number
+}
+
+function parseArgs(text: string): string[] {
+  return text.split('\n').flatMap(l => l.trim() ? l.trim().split(/\s+/) : [])
 }
 
 export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStartTest, onStopTest, isTesting, testResult, width }: ConfigPanelProps) {
@@ -34,7 +39,7 @@ export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStart
       setCommand(node.config.command || '')
       setWorkingDir(node.config.working_dir || '')
       setScriptPath(node.config.script_path || '')
-      setArgs((node.config.args || []).join(' '))
+      setArgs((node.config.args || []).join('\n'))
       setPythonPath(node.config.python_path || '')
       setModulePath(node.config.module_path || '')
       setFunctionName(node.config.function_name || '')
@@ -45,45 +50,31 @@ export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStart
 
   if (!node) return null
 
-  const handleSave = () => {
+  const buildConfig = () => {
     const paramsObj: Record<string, string> = {}
     for (const p of parameters) {
       if (p.key.trim()) paramsObj[p.key.trim()] = p.value
     }
-    onUpdate(node.id, {
-      name,
-      config: {
-        ...node.config,
-        command: command || undefined,
-        working_dir: workingDir || undefined,
-        script_path: scriptPath || undefined,
-        args: args ? args.split(/\s+/) : [],
-        python_path: pythonPath || undefined,
-        module_path: modulePath || undefined,
-        function_name: functionName || undefined,
-        parameters: Object.keys(paramsObj).length > 0 ? paramsObj : undefined,
-      },
-    })
-  }
-
-  const handleTest = () => {
-    handleSave()
-    const paramsObj: Record<string, string> = {}
-    for (const p of parameters) {
-      if (p.key.trim()) paramsObj[p.key.trim()] = p.value
-    }
-    const config: Record<string, unknown> = {
+    return {
       ...node.config,
       command: command || undefined,
       working_dir: workingDir || undefined,
       script_path: scriptPath || undefined,
-      args: args ? args.split(/\s+/) : [],
+      args: args ? parseArgs(args) : [],
       python_path: pythonPath || undefined,
       module_path: modulePath || undefined,
       function_name: functionName || undefined,
       parameters: Object.keys(paramsObj).length > 0 ? paramsObj : undefined,
     }
-    onStartTest(node.node_type, config)
+  }
+
+  const handleSave = () => {
+    onUpdate(node.id, { name, config: buildConfig() })
+  }
+
+  const handleTest = () => {
+    handleSave()
+    onStartTest(node.node_type, buildConfig() as Record<string, unknown>)
   }
 
   useEffect(() => {
@@ -126,12 +117,13 @@ export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStart
           <>
             <div style={{ marginBottom: 12 }}>
               <label style={labelStyle}>Command</label>
-              <textarea
+              <CodeEditor
                 value={command}
-                onChange={e => setCommand(e.target.value)}
+                onChange={setCommand}
                 onBlur={handleSave}
-                style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }}
                 placeholder="e.g. python train.py --lr 0.01"
+                language="shell"
+                minHeight={120}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -161,13 +153,17 @@ export default function ConfigPanel({ node, onUpdate, onClose, testLogs, onStart
             </div>
             <div style={{ marginBottom: 12 }}>
               <label style={labelStyle}>Arguments</label>
-              <input
+              <CodeEditor
                 value={args}
-                onChange={e => setArgs(e.target.value)}
+                onChange={setArgs}
                 onBlur={handleSave}
-                style={inputStyle}
-                placeholder="e.g. --lr 0.01 --epochs 10"
+                placeholder={"--lr 0.01\n--epochs 10\n--data-dir /path/to/data"}
+                language="args"
+                minHeight={120}
               />
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                One argument group per line
+              </div>
             </div>
             <div style={{ marginBottom: 12 }}>
               <label style={labelStyle}>Python Path</label>

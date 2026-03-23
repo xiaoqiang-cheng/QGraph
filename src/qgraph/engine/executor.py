@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from typing import Any
 
 from qgraph.core.models import ExecutionResult, Graph, NodeStatus
+
+
+def _substitute_env_vars(text: str, env: dict[str, str]) -> str:
+    def replacer(m: re.Match) -> str:
+        key = m.group(1) or m.group(2)
+        return env.get(key, m.group(0))
+    return re.sub(r'\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)', replacer, text)
 
 
 class PipelineExecutor:
@@ -241,11 +249,12 @@ class PipelineExecutor:
         if not command:
             raise ValueError("Shell command node has no command configured")
 
-        await log(f"[{node.name}] Running: {command}")
-        cwd = node.config.working_dir or self._project_dir
-
         import os
         env = {**os.environ, **(extra_env or {}), **(node.config.env_vars or {})}
+        command = _substitute_env_vars(command, env)
+
+        await log(f"[{node.name}] Running: {command}")
+        cwd = node.config.working_dir or self._project_dir
 
         process = await asyncio.create_subprocess_shell(
             command,
@@ -282,12 +291,15 @@ class PipelineExecutor:
 
         python_path = node.config.python_path or "python"
         args = node.config.args or []
-        cmd = [python_path, script_path, *args]
-
-        await log(f"[{node.name}] Running: {' '.join(cmd)}")
 
         import os
         env = {**os.environ, **(extra_env or {}), **(node.config.env_vars or {})}
+        script_path = _substitute_env_vars(script_path, env)
+        args = [_substitute_env_vars(a, env) for a in args]
+
+        cmd = [python_path, script_path, *args]
+
+        await log(f"[{node.name}] Running: {' '.join(cmd)}")
 
         process = await asyncio.create_subprocess_exec(
             *cmd,

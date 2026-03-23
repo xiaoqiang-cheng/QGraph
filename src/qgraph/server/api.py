@@ -90,6 +90,20 @@ async def list_run_history() -> list[dict[str, Any]]:
 
 @router.get("/runs/{run_id}/logs")
 async def get_run_logs(run_id: str) -> dict[str, Any]:
+    run = run_manager.get_run(run_id)
+    if run and run.status == "running":
+        from datetime import datetime, timezone
+        return {
+            "run_id": run.run_id,
+            "graph_name": run.graph_name,
+            "status": "running",
+            "started_at": datetime.fromtimestamp(
+                run.started_at, tz=timezone.utc,
+            ).isoformat(),
+            "finished_at": None,
+            "node_statuses": dict(run.node_statuses),
+            "logs": list(run.logs),
+        }
     data = RunManager.load_log(run_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"Logs for run '{run_id}' not found")

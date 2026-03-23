@@ -85,6 +85,30 @@ def get_all_running_dirs() -> list[Path]:
     return dirs
 
 
+def get_live_logs_dir(is_local: bool | None = None) -> Path:
+    if is_local is None:
+        is_local = get_local_qgraph_dir() is not None
+    if is_local:
+        local = get_local_qgraph_dir()
+        if local:
+            d = local / "live_logs"
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+    d = get_qgraph_home() / "live_logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_all_live_logs_dirs() -> list[Path]:
+    dirs = [get_qgraph_home() / "live_logs"]
+    local = get_local_qgraph_dir()
+    if local:
+        dirs.append(local / "live_logs")
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+    return dirs
+
+
 def is_local_mode() -> bool:
     return get_local_qgraph_dir() is not None
 

@@ -19,7 +19,7 @@ def main():
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     for epoch in range(1, epochs + 1):
-        time.sleep(0.5)
+        time.sleep(5)
         loss = 1.0 / (epoch + 1) + random.uniform(-0.05, 0.05)
         acc = min(0.99, 0.5 + epoch * 0.1 + random.uniform(-0.02, 0.02))
         print(f"  Epoch {epoch}/{epochs} - loss: {loss:.4f} - acc: {acc:.4f}")

@@ -4,56 +4,53 @@
 
 ---
 
-## 🔴 已知 Bug（优先修复）
+## 🔴 v0.1.8 紧急修复（用户实测反馈）— ✅ 全部完成
 
-- [x] ~~**Dashboard 删除图功能不生效**~~ ✅ 已修复
-  - 根因：`path.unlink()` 在某些环境下静默失败（文件未真正删除但不抛异常）
-  - 修复：`storage.delete_graph()` 增加删除后验证 + `os.remove()` 备选 + 明确错误抛出
-  - API 层增加 `OSError` 捕获，返回 500 错误信息
-  - 前端使用 POST `/graphs/{name}/delete` 路由（避免 DELETE 方法被拦截）
-
-- [x] ~~**运行日志未持久化**~~ ✅ 已修复
-  - 根因：中文路径环境导致 PermissionError，迁移到英文路径后正常
-  - 验证：`_save_log()` 正常写入 `~/.qgraph/logs/`，API `/api/runs/history` 正常返回
-
-- [x] ~~**Run status 判断不准确**~~ ✅ 已修复
-  - 根因：`executor.execute()` 节点失败时不抛异常，`_run()` 总是设为 `"completed"`
-  - 修复：检查 executor 返回的 results，有任何节点 FAILED 则 status 设为 `"failed"`
+- [x] ~~运行中日志不可查看~~ — live_logs 实时写入 + `qgraph logs -f` + 自动 follow
+- [x] ~~环境变量 `$XXX` 未替换~~ — executor 做 `$VAR` / `${VAR}` 模板替换
+- [x] ~~编辑器节点状态未清除~~ — 成功运行后 3s 重置为 idle；保存时强制写 idle
+- [x] ~~CLI 运行 Web 端不同步~~ — `list_runs()` 合并内存 + running 文件；Dashboard 轮询发现 CLI 运行
+- [x] ~~`qgraph logs` 运行中不自动跟踪~~ — 检测到 running 自动切换 follow 模式
+- [x] ~~编辑器加载时节点残留旧状态~~ — handleLoad 强制 idle + 检测活跃运行展示日志面板
+- [x] ~~Dashboard Running 缺少 Logs 按钮~~ — 新增 Logs 按钮 + LogViewer 轮询刷新
+- [x] ~~Dashboard 无 Run ID 显示~~ — RunIdBadge 组件 + 双击复制
 
 ---
 
-## 🟡 待完善功能（MVP 范围内）
+## 🟡 v0.1.x 体验优化（用户实测反馈）
 
-- [x] ~~**`qgraph logs <run_id>` 命令**~~ ✅ 已验证可用（依赖日志持久化，已修复）
-- [x] ~~**Web UI 实时日志面板**~~ ✅ 已完成
-  - 可拖拽调整高度（120px ~ 600px）
-  - 自动滚动跟随 + 手动滚动暂停 + "↓ Follow" 按钮恢复
-  - RUNNING 状态标签 + 日志行数统计
-  - Clear 清空按钮
-  - 长文本自动换行（`pre-wrap` + `break-all`）
-- [x] ~~**`qgraph serve` 默认绑定 `0.0.0.0`**~~ ✅ 已完成
-- [x] ~~**节点自测（Test Node）**~~ ✅ 已完成
-- [x] ~~**Input 节点参数传递**~~ ✅ 已完成
-- [x] ~~**前端 Build → pip 打包**~~ ✅ 已完成
+- [ ] **Quick Add 多行 echo 解析问题**
+  - 现象：粘贴多行 echo 命令时，每个 echo 变成独立节点，用户期望合并为一个 shell 节点
+  - 方案：增加智能合并策略——连续的同类简单命令（echo/export/set）合并为一个 shell 节点
 
-### v0.1.0 发布前（按优先级排序）
+- [ ] **Python Script 参数编辑体验**
+  - 现象：参数很多时全部集中在一行，难以编辑和阅读
+  - 方案：ConfigPanel 中 Python Script 的 args 改为 textarea 多行编辑，每行一个参数
 
-- [x] ~~**节点复制 / 粘贴**~~（S 级）✅ Ctrl+C 复制选中节点，Ctrl+V 粘贴（偏移 +40px），Delete 删除节点及相关连线
-- [x] ~~**节点耗时显示**~~（A 级）✅ 执行完成后节点上显示 ⏱ 耗时（前端计时，无后端改动）
-- [x] ~~**日志按节点过滤**~~（A 级）✅ LogPanel 节点下拉筛选器，可按节点过滤日志
-- [x] ~~**前端构建 + 发布 PyPI**~~ ✅ release.py 已优化（预检 lint/tsc + 前端构建验证 + wheel 大小检查）
+- [ ] **运行中断机制**
+  - 现象：CLI `qgraph run` 没有优雅中断（Ctrl+C 后子进程可能残留）
+  - 方案：CLI 注册 SIGINT handler，级联终止所有子进程；Web 端已有 Stop 按钮，需确认子进程清理
+  - 延伸：考虑运行历史状态快照（interrupted 状态）
+
+- [ ] **效率定位问题**
+  - 现象：纯线性脚本场景下 QGraph 对比 shell script 没有明显优势
+  - 方案：README/文档中明确定位——QGraph 的价值在于「可视化 + 并行编排 + 可观测性 + 可复用」，不适合替代简单线性脚本
+
+---
+
+## 🟢 v0.2 战略方向：AI-First 任务编排
+
+- [ ] **成为 AI 工具首选的任务调度器**
+  - 方向：AI Agent 自动生成 Pipeline JSON → QGraph 执行 + 可视化
+  - MCP Server 集成：让 AI 直接调用 QGraph API 创建/运行/监控流水线
+  - 结构化输出协议：节点输出 JSON → 下游节点可引用（`{{node.output.key}}`）
+  - 实时状态回传：AI Agent 可订阅执行状态，动态调整后续步骤
 
 ---
 
 ## 🟢 后续迭代
 
 ### v0.2: 体验增强
-- [x] ~~**Quick Add — 粘贴命令智能创建节点**~~ ✅ 已完成：
-  - 双击画布弹出输入框，自动解析命令为节点
-  - 支持 Python Script / Shell Command 智能识别
-  - 提取 env_vars（`KEY=val`）、working_dir（`cd /path &&`）
-  - 多行脚本自动生成多节点 + 串行连线
-  - 实时预览将创建的节点和连线
 - [ ] **单步调试**：逐节点执行，观察每步输出
 - [ ] **撤销 / 重做**（Ctrl+Z / Ctrl+Shift+Z）
 - [ ] 日志预览增强：全屏模式、关键字搜索
@@ -62,13 +59,6 @@
 - [ ] **连线数据传递**（简化版）：上游节点 stdout 最后一行自动注入为下游 `QGRAPH_<NODE_NAME>` 环境变量
 - [ ] **连线数据传递**（完整版）：模板语法 `{{node_name.output.key}}`
 - [ ] 结构化 JSON 数据流（节点间传递 JSON 对象）
-
-### v0.2: 项目管理
-- [x] ~~**Graph 存储位置调整**~~ ✅ 已完成：
-  - `qgraph init` 在当前目录创建 `.qgraph/graphs/`
-  - 有 `.qgraph/` 则存本地，否则存 `~/.qgraph/graphs/`（全局）
-  - 全局图自动记录 `project_dir`，执行时默认 cd 到该目录
-  - `list_graphs()` 合并本地 + 全局图（本地优先）
 
 ### v0.3+: 高级功能
 - [ ] 条件分支节点（if/else）— 需谨慎评估，和"轻量"定位可能冲突
@@ -131,3 +121,17 @@
 - [x] `qgraph ps` 基于 PID 文件检测运行中任务（不依赖 serve）
 - [x] Quick Add：双击画布粘贴命令创建节点 + 多行脚本自动连线
 - [x] Smoke test（30 项自动化检查）
+- [x] Web UI 实时日志面板（可拖拽高度、自动滚动、节点过滤、Clear 按钮）
+- [x] 前端 Build → pip 打包
+- [x] Graph 存储位置调整（本地 `.qgraph/` + 全局 `~/.qgraph/`）
+- [x] Dashboard 删除图功能修复
+- [x] 运行日志持久化修复
+- [x] Run status 判断修复
+- [x] 运行中日志实时查看：`live_logs/` 实时写入 + `qgraph logs -f` 跟踪模式
+- [x] 环境变量 `$VAR` / `${VAR}` 模板替换（shell command + python script args）
+- [x] 编辑器节点状态自动清除（成功运行后 3 秒重置为 idle）
+- [x] CLI/Web 运行状态统一（list_runs 合并内存 + running 文件，Dashboard 自动发现 CLI 运行）
+- [x] `qgraph logs` 运行中任务自动切换 follow 模式
+- [x] 编辑器加载时强制 idle + 检测活跃运行展示日志面板
+- [x] Dashboard Running 增加 Logs 按钮 + LogViewer 1s 轮询刷新
+- [x] Dashboard Run ID 显示（RunIdBadge 组件 + 双击复制 + 单击不冒泡）

@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from qgraph.core.storage import (
+    get_all_live_logs_dirs,
     get_all_logs_dirs,
     get_all_running_dirs,
+    get_live_logs_dir,
     get_logs_dir,
     get_running_dir,
 )
@@ -64,6 +66,7 @@ class RunManager:
 
     def list_runs(self, include_finished: bool = True) -> list[dict[str, Any]]:
         results = []
+        seen_run_ids: set[str] = set()
         for run in self._runs.values():
             if not include_finished and run.status != "running":
                 continue
@@ -77,6 +80,20 @@ class RunManager:
                 "current_node": run.current_node,
                 "node_statuses": dict(run.node_statuses),
             })
+            seen_run_ids.add(run.run_id)
+
+        for ext_run in self.list_running():
+            if ext_run["run_id"] not in seen_run_ids:
+                results.append({
+                    "run_id": ext_run["run_id"],
+                    "graph_name": ext_run["graph_name"],
+                    "status": "running",
+                    "started_at": ext_run.get("started_at", ""),
+                    "elapsed_seconds": ext_run.get("elapsed_seconds", 0),
+                    "current_node": None,
+                    "node_statuses": {},
+                })
+
         return results
 
     def get_run(self, run_id: str) -> RunInfo | None:
@@ -101,6 +118,38 @@ class RunManager:
         (running_dir / f"{run_id}.json").write_text(
             json.dumps(data), encoding="utf-8",
         )
+
+    @staticmethod
+    def append_live_log(run_id: str, message: str, is_local: bool = False):
+        live_dir = get_live_logs_dir(is_local)
+        log_file = live_dir / f"{run_id}.log"
+        try:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(message + "\n")
+        except OSError:
+            pass
+
+    @staticmethod
+    def read_live_log(run_id: str) -> list[str]:
+        for d in get_all_live_logs_dirs():
+            p = d / f"{run_id}.log"
+            if p.exists():
+                try:
+                    text = p.read_text(encoding="utf-8")
+                    return [line for line in text.splitlines() if line]
+                except OSError:
+                    pass
+        return []
+
+    @staticmethod
+    def remove_live_log(run_id: str):
+        for d in get_all_live_logs_dirs():
+            p = d / f"{run_id}.log"
+            if p.exists():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
     @staticmethod
     def remove_running_file(run_id: str, is_local: bool = False):
@@ -179,6 +228,28 @@ class RunManager:
             p = d / f"{run_id}.json"
             if p.exists():
                 return json.loads(p.read_text(encoding="utf-8"))
+
+        running_info = None
+        for d in get_all_running_dirs():
+            rp = d / f"{run_id}.json"
+            if rp.exists():
+                try:
+                    running_info = json.loads(rp.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    pass
+                break
+
+        live_lines = RunManager.read_live_log(run_id)
+        if live_lines or running_info:
+            return {
+                "run_id": run_id,
+                "graph_name": running_info.get("graph_name", "") if running_info else "",
+                "status": "running",
+                "started_at": running_info.get("started_at", "") if running_info else "",
+                "finished_at": None,
+                "node_statuses": {},
+                "logs": live_lines,
+            }
         return None
 
     @staticmethod
@@ -240,6 +311,7 @@ class RunManager:
 
         async def on_log(gn: str, node_id: str, message: str):
             run_info.logs.append(f"[{node_id}] {message}")
+            self.append_live_log(run_id, f"[{node_id}] {message}", is_local)
             if self._on_log:
                 await self._on_log(gn, node_id, message, run_id)
 
@@ -272,6 +344,7 @@ class RunManager:
                 run_info.current_node = None
                 self._save_log(run_info)
                 self.remove_running_file(run_id, is_local)
+                self.remove_live_log(run_id)
 
         run_info.task = asyncio.create_task(_run())
         return run_id
